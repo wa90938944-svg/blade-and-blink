@@ -148,7 +148,7 @@
   function onEv(ev) {
     (ev || []).forEach(function (e) {
       if (e.t === 'blink') fx.push({ k: 'l', x1: e.x1, y1: e.y1, x2: e.x2, y2: e.y2, t: 0.4, c: COL[e.i] });
-      else if (e.t === 'parry') { burst(e.x, e.y, '#ffe27a', 22); say('Parried!', 0.8); shake = 6; }
+      else if (e.t === 'parry') { burst(e.x, e.y, '#ffe27a', 22); say(e.b ? 'Dash punished!' : 'Parried!', 0.8); shake = 6; }
       else if (e.t === 'kill') { burst(e.x, e.y, COL[e.i], 40); shake = 10; }
     });
   }
@@ -282,7 +282,7 @@
       if (p.sw >= 0) {
         var act = p.sw >= A0 && p.sw < A1;
         ctx.globalAlpha = act ? 0.85 : 0.2; ctx.fillStyle = act ? '#fff' : c;
-        ctx.beginPath(); ctx.moveTo(px, py); ctx.arc(px, py, R + 34, p.fa - 1.05, p.fa + 1.05); ctx.closePath(); ctx.fill();
+        ctx.beginPath(); ctx.moveTo(px, py); ctx.arc(px, py, S.REACH, p.fa - 1.05, p.fa + 1.05); ctx.closePath(); ctx.fill();
         ctx.globalAlpha = 1;
       }
       if (p.pa >= 0) {
@@ -313,7 +313,7 @@
         if (full) ctx.fillRect(-6, -6, 12, 12);
         else {
           ctx.globalAlpha = 0.4; ctx.strokeRect(-6, -6, 12, 12);
-          if (part) { ctx.globalAlpha = 0.7; var h = 12 * (p.rc / 2.2); ctx.fillRect(-6, 6 - h, 12, h); }
+          if (part) { ctx.globalAlpha = 0.7; var h = 12 * (p.rc / S.CHARGE_T); ctx.fillRect(-6, 6 - h, 12, h); }
         }
         ctx.restore();
       }
