@@ -1,0 +1,153 @@
+const express = require('express');
+const http = require('http');
+const path = require('path');
+const fs = require('fs');
+const crypto = require('crypto');
+const { Server } = require('socket.io');
+const G = require('./public/shared.js');
+
+const PORT = process.env.PORT || 3000;
+const WIN_ROUNDS = 5;          // first to 5 = best of 9
+const START_MMR = 300;
+const WIN_MMR = 25, LOSS_MMR = 20;
+const DB_FILE = path.join(__dirname, 'players.json');
+
+const app = express();
+app.use(express.static(path.join(__dirname, 'public')));
+const server = http.createServer(app);
+const io = new Server(server);
+
+// ---------- player records (saved to players.json) ----------
+let players = Object.create(null);
+try { Object.assign(players, JSON.parse(fs.readFileSync(DB_FILE, 'utf8'))); } catch (e) {}
+const save = () => fs.writeFile(DB_FILE, JSON.stringify(players), () => {});
+const rankOf = (mmr) => (mmr >= 1001 ? 'Gold' : mmr >= 501 ? 'Silver' : 'Bronze');
+const profile = (key) => {
+  const p = players[key];
+  return { name: p.name, mmr: p.mmr, rank: rankOf(p.mmr), wins: p.wins, losses: p.losses };
+};
+
+// ---------- matchmaking ----------
+let queue = []; // { s, key, name, mmr, since }
+const rooms = new Map();
+
+function tryMatch() {
+  const now = Date.now();
+  for (let i = 0; i < queue.length; i++) {
+    for (let j = i + 1; j < queue.length; j++) {
+      const a = queue[i], b = queue[j];
+      // the MMR window widens the longer someone waits
+      const waited = Math.max(now - a.since, now - b.since) / 1000;
+      if (Math.abs(a.mmr - b.mmr) <= 100 + 50 * waited) {
+        queue.splice(j, 1); queue.splice(i, 1);
+        startRoom(a, b);
+        return tryMatch();
+      }
+    }
+  }
+}
+setInterval(tryMatch, 1000);
+
+function startRoom(a, b) {
+  const id = crypto.randomBytes(4).toString('hex');
+  const room = { id, users: [a, b], m: G.create(WIN_ROUNDS), inp: [{}, {}], done: false };
+  rooms.set(id, room);
+  const info = {
+    names: [a.name, b.name],
+    ranks: [rankOf(a.mmr), rankOf(b.mmr)],
+    mmrs: [a.mmr, b.mmr],
+  };
+  [a, b].forEach((u, i) => {
+    u.s.join(id);
+    u.s.data.room = room;
+    u.s.data.idx = i;
+    u.s.emit('match', Object.assign({ id, you: i }, info));
+  });
+  console.log(`room ${id}: ${a.name} (${a.mmr}) vs ${b.name} (${b.mmr})`);
+}
+
+function finish(room, winner, forfeit) {
+  if (room.done) return;
+  room.done = true;
+  rooms.delete(room.id);
+  room.users.forEach((u, i) => {
+    const p = players[u.key];
+    const won = i === winner;
+    p.mmr = Math.max(0, p.mmr + (won ? WIN_MMR : -LOSS_MMR));
+    if (won) p.wins++; else p.losses++;
+    u.delta = won ? WIN_MMR : -LOSS_MMR;
+  });
+  save();
+  room.users.forEach((u, i) => {
+    u.s.leave(room.id);
+    u.s.data.room = null;
+    u.s.emit('end', { winner, you: i, forfeit: !!forfeit, delta: u.delta,
+                      score: room.m.score, profile: profile(u.key) });
+  });
+}
+
+// ---------- 60 FPS authoritative game loop ----------
+let last = Date.now();
+setInterval(() => {
+  const now = Date.now();
+  const dt = Math.min(0.05, (now - last) / 1000);
+  last = now;
+  for (const room of rooms.values()) {
+    const ev = G.tick(room.m, room.inp, dt);
+    room.inp.forEach((u) => { u.sw = u.pa = u.bl = false; }); // actions are one-shot
+    io.to(room.id).emit('s', { m: room.m, ev });
+    if (room.m.phase === 'over') finish(room, room.m.winner, false);
+  }
+}, 1000 / 60);
+
+// ---------- sockets ----------
+const num = (v, lo, hi) => { v = +v; return Number.isFinite(v) ? Math.max(lo, Math.min(hi, v)) : 0; };
+
+io.on('connection', (s) => {
+  s.on('login', (name, cb) => {
+    if (typeof cb !== 'function') return;
+    name = String(name || '').trim();
+    if (!/^[\w \-]{2,16}$/.test(name)) return cb({ err: 'Use 2-16 letters, numbers, spaces, - or _' });
+    const key = name.toLowerCase();
+    for (const other of io.sockets.sockets.values()) {
+      if (other !== s && other.data.key === key) return cb({ err: 'That name is already online' });
+    }
+    if (!players[key]) players[key] = { name, mmr: START_MMR, wins: 0, losses: 0 };
+    s.data.key = key;
+    save();
+    cb({ ok: true, profile: profile(key) });
+  });
+
+  s.on('queue', () => {
+    if (!s.data.key || s.data.room || queue.some((q) => q.s === s)) return;
+    const p = players[s.data.key];
+    queue.push({ s, key: s.data.key, name: p.name, mmr: p.mmr, since: Date.now() });
+    tryMatch();
+  });
+
+  s.on('unqueue', () => { queue = queue.filter((q) => q.s !== s); });
+
+  s.on('in', (d) => {
+    const room = s.data.room;
+    if (!room) return;
+    d = d || {};
+    const u = room.inp[s.data.idx];
+    u.x = num(d.x, -1, 1);
+    u.y = num(d.y, -1, 1);
+    u.aim = Number.isFinite(+d.aim) && d.aim !== null ? +d.aim : undefined;
+  });
+
+  s.on('act', (k) => {
+    const room = s.data.room;
+    if (!room || !['sw', 'pa', 'bl'].includes(k)) return;
+    room.inp[s.data.idx][k] = true; // cooldowns are enforced inside the shared sim
+  });
+
+  s.on('disconnect', () => {
+    queue = queue.filter((q) => q.s !== s);
+    const room = s.data.room;
+    if (room) finish(room, 1 - s.data.idx, true); // leaving mid-match = forfeit
+  });
+});
+
+server.listen(PORT, () => console.log(`Blade & Blink running on http://localhost:${PORT}`));
