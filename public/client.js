@@ -3,11 +3,12 @@
   var S = Shared, W = S.W, H = S.H, R = S.R, PAR = S.PAR, A0 = S.A0, A1 = S.A1;
   var $ = function (i) { return document.getElementById(i); };
   var cv = $('c'), ctx = cv.getContext('2d');
-  var COL = ['#6fe3ff', '#ff5a4d'];
+  var COL = ['#191514', '#c9331f'];
+  try { document.fonts.load('40px "Dela Gothic One"'); document.fonts.load('600 14px "Barlow Condensed"'); } catch (e) {}
   var RANKS = [
     { n: 'Bronze', min: 0, next: 501, c: '#cd7f32' },
-    { n: 'Silver', min: 501, next: 1001, c: '#c4ccd8' },
-    { n: 'Gold', min: 1001, next: 1001, c: '#ffc933' }
+    { n: 'Silver', min: 501, next: 1001, c: '#b8b3a8' },
+    { n: 'Gold', min: 1001, next: 1001, c: '#d9a526' }
   ];
   var CTRL = [
     { u: 'w', d: 's', l: 'a', r: 'd', sw: 'f', pa: 'g', bl: 'h' },
@@ -57,6 +58,12 @@
   function pips(n, win) { var s = ''; for (var i = 0; i < win; i++) s += i < n ? '\u25CF' : '\u25CB'; return s; }
   function hud() {
     if (!M) return;
+    if (M.endless) {
+      $('s0').textContent = 'Kills ' + M.kills;
+      $('s1').textContent = 'Bots ' + M.p.filter(function (q) { return q.i > 0 && !q.dead; }).length;
+      $('rnd').textContent = 'Endless ' + Math.floor(M.time) + 's';
+      return;
+    }
     $('s0').textContent = names[0] + ' ' + pips(M.score[0], M.win);
     $('s1').textContent = pips(M.score[1], M.win) + ' ' + names[1];
     $('rnd').textContent = (mode === 'online' ? 'Ranked, round ' : 'Round ') + M.round;
@@ -80,6 +87,7 @@
   $('rank').onclick = enterQueue;
   $('bot').onclick = function () { startLocal('bot'); };
   $('local').onclick = function () { startLocal('local'); };
+  $('endless').onclick = function () { startLocal('endless'); };
   $('cancel').onclick = function () { sock.emit('unqueue'); clearInterval(qI); showLobby(); };
   $('tolobby').onclick = showLobby;
   $('again').onclick = function () { if (lastKind === 'online') enterQueue(); else startLocal(lastKind); };
@@ -102,8 +110,8 @@
     show(null); hud();
   }
   function startLocal(k) {
-    lastKind = k; mode = k; M = S.create(4); me = 0;
-    names = ['P1', k === 'bot' ? 'Bot' : 'P2'];
+    lastKind = k; mode = k; M = k === 'endless' ? S.createEndless() : S.create(4); me = 0;
+    names = k === 'endless' ? ['You', 'Bots'] : ['P1', k === 'bot' ? 'Bot' : 'P2'];
     beginView();
   }
 
@@ -147,19 +155,20 @@
   }
   function onEv(ev) {
     (ev || []).forEach(function (e) {
-      if (e.t === 'blink') fx.push({ k: 'l', x1: e.x1, y1: e.y1, x2: e.x2, y2: e.y2, t: 0.4, c: COL[e.i] });
-      else if (e.t === 'parry') { burst(e.x, e.y, '#ffe27a', 22); say(e.b ? 'Dash punished!' : 'Parried!', 0.8); shake = 6; }
-      else if (e.t === 'kill') { burst(e.x, e.y, COL[e.i], 40); shake = 10; }
+      if (e.t === 'blink') fx.push({ k: 'l', x1: e.x1, y1: e.y1, x2: e.x2, y2: e.y2, t: 0.4, c: COL[e.i > 0 ? 1 : 0] });
+      else if (e.t === 'parry') { burst(e.x, e.y, '#b8891f', 22); say(e.b ? 'Dash punished!' : 'Parried!', 0.8); shake = 6; }
+      else if (e.t === 'kill') { burst(e.x, e.y, COL[e.i > 0 ? 1 : 0], 40); shake = M && M.endless && e.i > 0 ? 4 : 10; }
+      else if (e.t === 'spawn') burst(e.x, e.y, COL[1], 14);
     });
   }
   function watch() {
     if (!M || M.phase === lastPhase) return;
     lastPhase = M.phase;
-    if (M.phase === 'ready') { say('Round ' + M.round, 1.3); snap = true; }
+    if (M.phase === 'ready') { say(M.endless ? 'Survive!' : 'Round ' + M.round, 1.3); snap = true; }
     else if (M.phase === 'fight') say('Fight!', 0.6);
     else if (M.phase === 'roundend') {
       var w = M.score[0] > lastScore[0] ? 0 : M.score[1] > lastScore[1] ? 1 : -1;
-      say(w < 0 ? 'Double KO' : names[w] + ' scores', 1.7);
+      say(M.endless ? 'Overrun!' : w < 0 ? 'Double KO' : names[w] + ' scores', 1.7);
       lastScore = M.score.slice();
     }
     hud();
@@ -176,7 +185,7 @@
       else if (k === 'e') sock.emit('act', 'pa');
       return;
     }
-    for (var i = 0; i < (mode === 'bot' ? 1 : 2); i++) {
+    for (var i = 0; i < (mode === 'bot' || mode === 'endless' ? 1 : 2); i++) {
       var c = CTRL[i];
       if (k === c.sw) pend[i].sw = true;
       else if (k === c.pa) pend[i].pa = true;
@@ -232,7 +241,7 @@
   function smooth() {
     if (!M) return;
     for (var i = 0; i < 2; i++) {
-      var p = M.p[i], d = disp[i];
+      var p = M.p[i], d = disp[i]; if (!p) continue;
       if (snap || mode !== 'online' || Math.hypot(p.x - d.x, p.y - d.y) > 60) { d.x = p.x; d.y = p.y; }
       else { d.x += (p.x - d.x) * 0.5; d.y += (p.y - d.y) * 0.5; }
     }
@@ -249,27 +258,27 @@
   }
   function draw(now) {
     ctx.save();
-    ctx.fillStyle = '#0d0d16'; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#e8dfc9'; ctx.fillRect(0, 0, W, H);
     if (!M) {
       if (mode === 'online') {
-        ctx.fillStyle = '#8d8a99'; ctx.font = '16px sans-serif'; ctx.textAlign = 'center';
+        ctx.fillStyle = '#5a4f40'; ctx.font = '16px sans-serif'; ctx.textAlign = 'center';
         ctx.fillText('Match found, waiting for the server...', W / 2, H / 2);
       }
       ctx.restore(); return;
     }
     if (shake > 0) ctx.translate((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake);
-    ctx.strokeStyle = 'rgba(180,170,220,.07)'; ctx.lineWidth = 1; ctx.beginPath();
+    ctx.strokeStyle = 'rgba(60,40,20,.10)'; ctx.lineWidth = 1; ctx.beginPath();
     var x, y;
     for (x = 40; x < W; x += 40) { ctx.moveTo(x, 0); ctx.lineTo(x, H); }
     for (y = 40; y < H; y += 40) { ctx.moveTo(0, y); ctx.lineTo(W, y); }
     ctx.stroke();
-    ctx.strokeStyle = '#2c2a44'; ctx.lineWidth = 4; ctx.strokeRect(2, 2, W - 4, H - 4);
-    ctx.strokeStyle = 'rgba(180,170,220,.18)'; ctx.setLineDash([6, 8]);
+    ctx.strokeStyle = '#191514'; ctx.lineWidth = 8; ctx.strokeRect(4, 4, W - 8, H - 8);
+    ctx.strokeStyle = 'rgba(60,40,20,.22)'; ctx.setLineDash([6, 8]);
     ctx.beginPath(); ctx.moveTo(W / 2, 0); ctx.lineTo(W / 2, H); ctx.stroke(); ctx.setLineDash([]);
     fx.forEach(function (f) {
       if (f.k === 'l') {
         ctx.globalAlpha = Math.max(0, f.t / 0.4); ctx.strokeStyle = f.c; ctx.lineWidth = 8;
-        ctx.shadowColor = f.c; ctx.shadowBlur = 16;
+        ctx.lineCap = 'round';
         ctx.beginPath(); ctx.moveTo(f.x1, f.y1); ctx.lineTo(f.x2, f.y2); ctx.stroke();
         ctx.shadowBlur = 0; ctx.globalAlpha = 1;
       } else {
@@ -278,33 +287,35 @@
     });
     M.p.forEach(function (p, i) {
       if (p.dead) return;
-      var px = disp[i].x, py = disp[i].y, c = COL[i];
+      var px = disp[i] ? disp[i].x : p.x, py = disp[i] ? disp[i].y : p.y, c = COL[i > 0 ? 1 : 0];
       if (p.sw >= 0) {
         var act = p.sw >= A0 && p.sw < A1;
-        ctx.globalAlpha = act ? 0.85 : 0.2; ctx.fillStyle = act ? '#fff' : c;
+        ctx.globalAlpha = act ? 0.8 : 0.18; ctx.fillStyle = c;
         ctx.beginPath(); ctx.moveTo(px, py); ctx.arc(px, py, S.REACH, p.fa - 1.05, p.fa + 1.05); ctx.closePath(); ctx.fill();
         ctx.globalAlpha = 1;
       }
       if (p.pa >= 0) {
         var on = p.pa < PAR;
-        ctx.strokeStyle = on ? '#ffe27a' : 'rgba(255,226,122,.25)'; ctx.lineWidth = on ? 4 : 2;
+        ctx.strokeStyle = on ? '#b8891f' : 'rgba(184,137,31,.3)'; ctx.lineWidth = on ? 4 : 2;
         ctx.beginPath(); ctx.arc(px, py, R + 9 + (on ? p.pa * 20 : 0), 0, 7); ctx.stroke();
       }
-      ctx.shadowColor = c; ctx.shadowBlur = 18; ctx.fillStyle = p.st > 0 ? '#ddd' : c;
+      ctx.shadowBlur = 0; ctx.fillStyle = p.st > 0 ? '#9c9484' : c;
       ctx.beginPath(); ctx.arc(px, py, R, 0, 7); ctx.fill(); ctx.shadowBlur = 0;
-      ctx.strokeStyle = '#fff'; ctx.lineWidth = 4; ctx.beginPath();
+      ctx.strokeStyle = '#191514'; ctx.lineWidth = 7; ctx.lineCap = 'round'; ctx.beginPath();
       ctx.moveTo(px + Math.cos(p.fa) * R * 0.4, py + Math.sin(p.fa) * R * 0.4);
       ctx.lineTo(px + Math.cos(p.fa) * (R + 14), py + Math.sin(p.fa) * (R + 14)); ctx.stroke();
+      ctx.strokeStyle = '#efe6d2'; ctx.lineWidth = 3; ctx.stroke();
       if (p.st > 0) {
-        ctx.strokeStyle = '#ffe27a'; ctx.lineWidth = 2;
+        ctx.strokeStyle = '#b8891f'; ctx.lineWidth = 2;
         for (var k = 0; k < 3; k++) { var a = now / 120 + k * 2.1; ctx.beginPath(); ctx.arc(px + Math.cos(a) * 15, py - R - 8 + Math.sin(a) * 4, 3, 0, 7); ctx.stroke(); }
       }
       if (mode === 'online' && i === me) {
-        ctx.fillStyle = '#fff'; ctx.font = 'bold 11px "Trebuchet MS",sans-serif'; ctx.textAlign = 'center';
+        ctx.fillStyle = '#191514'; ctx.font = '600 14px "Barlow Condensed", sans-serif'; ctx.textAlign = 'center';
         ctx.fillText('YOU', px, py - R - 18);
       }
     });
     M.p.forEach(function (p, i) {
+      if (M.endless && i > 0) return;
       var bx = i === 0 ? 20 : W - 20 - 3 * 22;
       for (var k = 0; k < 3; k++) {
         var full = k < p.ch, part = k === p.ch;
@@ -319,13 +330,19 @@
       }
     });
     if (msgT > 0) {
-      ctx.globalAlpha = Math.min(1, msgT * 3); ctx.fillStyle = '#f1ece4';
-      ctx.font = 'bold 44px "Trebuchet MS",sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.globalAlpha = Math.min(1, msgT * 3); ctx.fillStyle = '#191514';
+      ctx.font = '44px "Dela Gothic One", Impact, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.fillText(msg, W / 2, H / 2 - 60); ctx.globalAlpha = 1;
     }
     ctx.restore();
   }
 
+  function endResult() {
+    var best = 0;
+    try { best = +localStorage.getItem('bb_best') || 0; } catch (e) {}
+    if (M.kills > best) { best = M.kills; try { localStorage.setItem('bb_best', best); } catch (e) {} }
+    result('Overrun!', 'Kills: ' + M.kills + '   Survived: ' + Math.floor(M.time) + 's', 'Best: ' + best + ' kills', '');
+  }
   var last = performance.now();
   function loop(now) {
     var dt = Math.min(0.033, (now - last) / 1000); last = now;
@@ -335,22 +352,23 @@
   function fail(err) {
     console.error('Blade & Blink render error:', err);
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.fillStyle = '#0d0d16'; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#e8dfc9'; ctx.fillRect(0, 0, W, H);
     ctx.fillStyle = '#ff5a4d'; ctx.font = '14px sans-serif'; ctx.textAlign = 'center';
     ctx.fillText('Render error: ' + ((err && err.message) || err), W / 2, H / 2);
   }
   function frame(now, dt) {
-    if (M && (mode === 'bot' || mode === 'local') && M.phase !== 'over') {
-      var inp = [localInp(0), mode === 'bot' ? botInp(dt) : localInp(1)];
+    if (M && (mode === 'bot' || mode === 'local' || mode === 'endless') && M.phase !== 'over') {
+      var inp = mode === 'endless' ? [localInp(0)] : [localInp(0), mode === 'bot' ? botInp(dt) : localInp(1)];
       onEv(S.tick(M, inp, dt));
       if (M.phase === 'over') {
         var w = M.winner;
-        result(mode === 'bot' ? (w === 0 ? 'You win!' : 'The bot wins') : names[w] + ' wins!',
+        if (mode === 'endless') endResult(); else result(mode === 'bot' ? (w === 0 ? 'You win!' : 'The bot wins') : names[w] + ' wins!',
           names[0] + ' ' + M.score[0] + ' - ' + M.score[1] + ' ' + names[1], '', '');
         mode = null;
       }
     }
     watch(); smooth();
+    if (M && M.endless && mode === 'endless') hud();
     fxStep(M && M.phase === 'roundend' ? dt * 0.4 : dt);
     draw(now);
   }

@@ -4,48 +4,58 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Blade &amp; Blink</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Dela+Gothic+One&display=swap" rel="stylesheet">
 <style>
-:root{color-scheme:dark;--bg:#0a0a10;--panel:#14141f;--line:#2a2a40;--fg:#f1ece4;--dim:#8d8a99;--a:#6fe3ff;--b:#ff5a4d}
+:root{color-scheme:dark;--bg:#12100e;--panel:#1b1814;--line:#3a332a;--bone:#efe6d2;--dim:#a39884;--paper:#e8dfc9;--ink:#191514;--red:#c9331f;--redhi:#e2503a;--gold:#d9a526;
+--disp:"Dela Gothic One",Impact,"Arial Black",sans-serif;--ui:"Barlow Condensed","Arial Narrow",Arial,sans-serif}
 *{box-sizing:border-box}
 html,body{height:100%;margin:0}
-body{background:var(--bg);color:var(--fg);font-family:"Trebuchet MS",system-ui,sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;overflow:hidden;user-select:none;-webkit-user-select:none}
-#wrap{width:min(96vw,calc((100vh - 110px)*1.6))}
-#hud{display:flex;justify-content:space-between;align-items:center;font-weight:700;font-size:17px;margin-bottom:6px}
-#s0{color:var(--a)}#s1{color:var(--b)}#rnd{color:var(--dim);font-size:14px}
+body{background:var(--bg);color:var(--bone);font-family:var(--ui);font-size:17px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;overflow:hidden;user-select:none;-webkit-user-select:none}
+body::before{content:"";position:fixed;inset:0;pointer-events:none;opacity:.07;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='2'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E")}
+#wrap{width:min(94vw,calc((100vh - 130px)*1.55));border:3px solid var(--bone);box-shadow:7px 7px 0 var(--red);background:var(--paper)}
+#hud{display:flex;justify-content:space-between;align-items:center;padding:5px 14px;background:var(--paper);color:var(--ink);border-bottom:3px solid var(--ink);font-weight:700;font-size:21px;letter-spacing:.05em;text-transform:uppercase}
+#s1{color:var(--red)}
+#rnd{font-family:var(--disp);font-weight:400;font-size:13px;letter-spacing:.02em;color:#6b5f4c}
 #stage{position:relative}
-canvas{display:block;width:100%;height:auto;border-radius:8px;background:#0d0d16}
-#ov{position:absolute;inset:0;background:rgba(10,10,16,.95);border-radius:8px;display:flex;align-items:center;justify-content:center;padding:12px;overflow:auto}
-.screen{display:none;flex-direction:column;align-items:center;gap:12px;text-align:center;width:100%;max-width:430px;margin:auto}
+canvas{display:block;width:100%;height:auto;background:var(--paper)}
+#ov{position:absolute;inset:0;background:rgba(18,16,14,.96);display:flex;align-items:center;justify-content:center;padding:12px;overflow:auto}
+.screen{display:none;flex-direction:column;align-items:center;gap:12px;text-align:center;width:100%;max-width:420px;margin:auto}
 .screen.on{display:flex}
-h1{margin:0;font-size:clamp(26px,5.5vw,44px);line-height:1;letter-spacing:1px}
-h2{margin:0;font-size:clamp(24px,5vw,38px)}
-p{margin:0;color:var(--dim);font-size:14px;line-height:1.5}
-input{width:100%;font:inherit;font-size:17px;color:var(--fg);background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px 14px;text-align:center}
-input:focus{outline:2px solid var(--a);outline-offset:1px}
-button{font:inherit;font-weight:700;font-size:16px;color:#0a0a10;background:var(--a);border:0;border-radius:8px;padding:12px 18px;cursor:pointer;width:100%}
-button.sec{background:var(--panel);color:var(--fg);border:1px solid var(--line)}
-button.sec:hover:not(:disabled){border-color:var(--a)}
-button.ghost{background:none;color:var(--dim);font-weight:400;font-size:14px;width:auto;padding:6px 10px;text-decoration:underline}
-button:disabled{opacity:.35;cursor:not-allowed}
-button:focus-visible{outline:3px solid #fff;outline-offset:2px}
+h1,h2{font-family:var(--disp);font-weight:400;margin:0;line-height:1.05}
+h1{font-size:clamp(28px,5.5vw,46px)}
+h1 span{color:var(--red)}
+h2{font-size:clamp(24px,4.8vw,36px)}
+p{margin:0;color:var(--dim);font-size:16px;line-height:1.35}
+input{width:100%;font:600 21px var(--ui);letter-spacing:.04em;color:var(--bone);background:#0d0b09;border:2px solid var(--bone);border-radius:0;padding:10px 14px;text-align:center}
+input:focus{outline:3px solid var(--gold);outline-offset:2px}
+button{font:700 19px var(--ui);letter-spacing:.09em;text-transform:uppercase;color:var(--bone);background:var(--red);border:2px solid var(--red);border-radius:0;padding:10px 16px;cursor:pointer;width:100%;box-shadow:3px 3px 0 #000;transition:transform .08s}
+button:hover:not(:disabled){transform:translate(-1px,-1px)}
+button:active:not(:disabled){transform:translate(2px,2px);box-shadow:1px 1px 0 #000}
+button.sec{background:transparent;border-color:var(--bone)}
+button.sec:hover:not(:disabled){background:var(--bone);color:var(--ink)}
+button.ghost{background:none;border:0;box-shadow:none;color:var(--dim);font-weight:500;font-size:16px;letter-spacing:.02em;text-transform:none;width:auto;padding:4px 8px;text-decoration:underline}
+button:disabled{opacity:.35;cursor:not-allowed;box-shadow:none}
+button:focus-visible{outline:3px solid var(--gold);outline-offset:3px}
 .row{display:flex;gap:10px;width:100%}
-.err{color:var(--b);font-size:14px;min-height:18px}
-#card{display:flex;gap:14px;align-items:center;width:100%;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px;text-align:left}
-#badge{--rc:#cd7f32;flex:none;width:58px;height:58px;border-radius:50%;border:4px solid var(--rc);color:var(--rc);display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:700;box-shadow:0 0 18px color-mix(in srgb,var(--rc) 45%,transparent)}
+.err{color:var(--redhi);font-size:16px;min-height:20px}
+#card{display:flex;gap:14px;align-items:center;width:100%;background:var(--panel);border:2px solid var(--line);padding:12px 14px;text-align:left}
+#badge{--rc:#cd7f32;flex:none;width:56px;height:56px;border:3px solid var(--rc);color:var(--rc);display:flex;align-items:center;justify-content:center;font:400 26px var(--disp);transform:rotate(-5deg)}
 #info{flex:1;min-width:0}
-#uname{font-size:18px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-#rline{font-size:14px;color:var(--dim)}
-#rname{font-weight:700}
-#bar{height:6px;background:var(--line);border-radius:3px;margin:6px 0 3px;overflow:hidden}
-#prog{height:100%;width:0;background:var(--a)}
-#sub{display:flex;justify-content:space-between;font-size:12px;color:var(--dim)}
-.spin{width:54px;height:54px;border:4px solid var(--line);border-top-color:var(--a);border-radius:50%;animation:sp 1s linear infinite}
+#uname{font-weight:700;font-size:22px;letter-spacing:.04em;text-transform:uppercase;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#rline{font-size:16px;color:var(--dim)}
+#rname{font-weight:700;text-transform:uppercase;letter-spacing:.06em}
+#bar{height:8px;background:#2a251f;margin:6px 0 3px}
+#prog{height:100%;width:0;background:var(--gold)}
+#sub{display:flex;justify-content:space-between;font-size:14px;color:var(--dim)}
+.spin{width:50px;height:50px;border:5px solid var(--line);border-top-color:var(--red);border-radius:50%;animation:sp 1s linear infinite}
 @keyframes sp{to{transform:rotate(360deg)}}
 @media (prefers-reduced-motion:reduce){.spin{animation-duration:4s}}
-#qt{font-size:34px;font-weight:700;font-variant-numeric:tabular-nums}
-#rdelta{font-size:28px;font-weight:700}
-#rdelta.up{color:#6dff9c}#rdelta.down{color:var(--b)}
-#legend{font-size:12px;color:var(--dim);text-align:center;padding:0 8px}
+#qt{font:400 38px var(--disp);font-variant-numeric:tabular-nums}
+#rdelta{font:400 30px var(--disp)}
+#rdelta.up{color:#9bbf5b}#rdelta.down{color:var(--redhi)}
+#legend{font-size:15px;color:var(--dim);text-align:center;padding:0 8px;letter-spacing:.02em}
 </style>
 </head>
 <body>
@@ -55,9 +65,9 @@ button:focus-visible{outline:3px solid #fff;outline-offset:2px}
     <canvas id="c" width="640" height="400"></canvas>
     <div id="ov">
       <div class="screen on" id="login">
-        <h1>Blade &amp; Blink</h1>
-        <p>One hit kills. Pick a username to climb the ranked ladder.</p>
-        <input id="name" maxlength="16" placeholder="Username" autocomplete="off" aria-label="Username">
+        <h1>Blade <span>&amp;</span> Blink</h1>
+        <p>One hit kills. Pick a name and climb the ranked ladder.</p>
+        <input id="name" maxlength="16" placeholder="Your name" autocomplete="off" aria-label="Username">
         <div class="err" id="err" role="alert"></div>
         <button id="enter">Enter the arena</button>
         <button class="ghost" id="offline">Play offline without an account</button>
@@ -74,6 +84,7 @@ button:focus-visible{outline:3px solid #fff;outline-offset:2px}
         </div>
         <button id="rank">Find Ranked Match</button>
         <div class="row"><button class="sec" id="bot">Duel the bot</button><button class="sec" id="local">2 players, one keyboard</button></div>
+        <button class="sec" id="endless">Endless bot mode</button>
         <p>Ranked: WASD move, mouse aims, click swings, right-click or E parries, Space blinks.</p>
       </div>
       <div class="screen" id="queue">
