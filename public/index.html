@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
 <title>Blade &amp; Blink</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
 html,body{height:100%;margin:0}
 body{background:var(--bg);color:var(--bone);font-family:var(--ui);font-size:17px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;overflow:hidden;user-select:none;-webkit-user-select:none}
 body::before{content:"";position:fixed;inset:0;pointer-events:none;opacity:.07;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='2'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E")}
-#wrap{width:min(94vw,calc((100vh - 130px)*1.55));border:3px solid var(--bone);box-shadow:7px 7px 0 var(--red);background:var(--paper)}
+#wrap{width:min(94vw,calc((100vh - 130px)*1.55));width:min(94vw,calc((100dvh - 130px)*1.55));border:3px solid var(--bone);box-shadow:7px 7px 0 var(--red);background:var(--paper)}
 #hud{display:flex;justify-content:space-between;align-items:center;padding:5px 14px;background:var(--paper);color:var(--ink);border-bottom:3px solid var(--ink);font-weight:700;font-size:21px;letter-spacing:.05em;text-transform:uppercase}
 #s1{color:var(--red)}
 #rnd{font-family:var(--disp);font-weight:400;font-size:13px;letter-spacing:.02em;color:#6b5f4c}
@@ -65,6 +65,38 @@ button:focus-visible{outline:3px solid var(--gold);outline-offset:3px}
 #boardlist li{display:flex;justify-content:space-between;gap:12px;padding:6px 10px;border-bottom:1px solid var(--line);font-weight:600;letter-spacing:.04em;text-transform:uppercase}
 #boardlist li.me{background:var(--panel);color:var(--gold)}
 .stats{min-height:20px;font-size:14px}
+#pad{width:min(94vw,520px);display:flex;justify-content:space-between;align-items:center;gap:10px;touch-action:none;-webkit-touch-callout:none}
+#stick{position:relative;flex:none;width:clamp(104px,32vw,150px);aspect-ratio:1;border:3px solid var(--bone);border-radius:50%;background:rgba(27,24,20,.88);box-shadow:4px 4px 0 var(--red);touch-action:none}
+#stick::before,#stick::after{content:"";position:absolute;background:var(--line)}
+#stick::before{left:50%;top:14%;bottom:14%;width:2px;margin-left:-1px}
+#stick::after{top:50%;left:14%;right:14%;height:2px;margin-top:-1px}
+#knob{position:absolute;left:50%;top:50%;width:44%;height:44%;margin:-22% 0 0 -22%;border-radius:50%;background:var(--ink);border:3px solid var(--bone);box-shadow:2px 2px 0 #000}
+#btns{display:flex;gap:clamp(6px,2vw,12px);align-items:flex-end}
+.tb{width:clamp(56px,17vw,76px);height:clamp(56px,17vw,76px);padding:4px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;background:var(--ink);border:3px solid var(--bone);border-radius:0;box-shadow:3px 3px 0 #000;rotate:-3deg;font:700 12px var(--ui);letter-spacing:.08em;text-transform:uppercase;color:var(--bone);touch-action:none;user-select:none;-webkit-user-select:none}
+.tb:nth-child(2){rotate:2deg}
+.tb.red{background:var(--red)}
+.tb svg{width:42%;height:42%;fill:none;stroke:var(--bone);stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+.tb b{color:var(--gold);font-weight:700}
+.tb.red b{color:var(--bone)}
+.tb.down{translate:2px 2px;box-shadow:1px 1px 0 #000}
+.tb.cd{opacity:.4}
+@media (pointer:coarse){
+  body{padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);gap:8px;overscroll-behavior:none;-webkit-touch-callout:none;height:100dvh}
+  #ov{position:fixed;z-index:30;padding:max(12px,env(safe-area-inset-top)) 12px max(12px,env(safe-area-inset-bottom))}
+  #tools .ghost{min-height:36px}
+  button{touch-action:manipulation}
+  canvas{touch-action:none}
+}
+@media (pointer:coarse) and (orientation:landscape){
+  #wrap{width:min(94vw,calc((100dvh - 90px)*1.55))}
+  #pad:not([hidden]){position:fixed;left:0;right:0;bottom:0;width:auto;align-items:flex-end;padding:0 calc(14px + env(safe-area-inset-right)) calc(10px + env(safe-area-inset-bottom)) calc(14px + env(safe-area-inset-left));pointer-events:none}
+  #pad > *{pointer-events:auto}
+  #stick{width:clamp(92px,26vh,128px)}
+  #btns{flex-direction:column;flex-wrap:nowrap;gap:8px;width:auto}
+  .tb{width:clamp(50px,15vh,64px);height:clamp(50px,15vh,64px)}
+  #tbBlink{order:1}#tbParry{order:2}#tbSwing{order:3}
+}
+@media (max-width:480px){#hud{font-size:16px;padding:5px 10px}#rnd{font-size:11px}}
 </style>
 </head>
 <body>
@@ -95,7 +127,7 @@ button:focus-visible{outline:3px solid var(--gold);outline-offset:3px}
         <div class="row"><button class="sec" id="bot">Duel the bot</button><button class="sec" id="local">2 players, one keyboard</button></div>
         <button class="sec" id="endless">Endless bot mode</button>
         <button class="ghost" id="boardbtn" hidden>Leaderboard</button>
-        <p>Ranked: WASD move, mouse aims, click swings, right-click or E parries, Space blinks.</p>
+        <p id="hint">Ranked: WASD move, mouse aims, click swings, right-click or E parries, Space blinks.</p>
         <p class="stats"></p>
       </div>
       <div class="screen" id="queue">
@@ -120,6 +152,14 @@ button:focus-visible{outline:3px solid var(--gold);outline-offset:3px}
         <button class="sec" id="tolobby">Back to lobby</button>
       </div>
     </div>
+  </div>
+</div>
+<div id="pad" hidden>
+  <div id="stick" aria-label="Move"><div id="knob"></div></div>
+  <div id="btns">
+    <button class="tb" id="tbParry" aria-label="Parry"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7.5"/><circle cx="12" cy="12" r="2.8"/></svg><span>Parry</span></button>
+    <button class="tb" id="tbSwing" aria-label="Swing"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20 Q7 6 20 4"/><path d="M4 20 L2.5 21.5"/></svg><span>Swing</span></button>
+    <button class="tb red" id="tbBlink" aria-label="Blink"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 6 L12 12 L5 18"/><path d="M13 6 L20 12 L13 18"/></svg><span>Blink <b id="chn">3</b></span></button>
   </div>
 </div>
 <div id="tools"><button class="ghost" id="mute">Sound on</button><span id="ping"></span><button class="ghost" id="forfeit" hidden>Forfeit</button></div>

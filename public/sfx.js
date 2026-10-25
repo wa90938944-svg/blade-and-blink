@@ -48,6 +48,7 @@
   var SND = {
     swing: function (p) { noise('bandpass', 500, 2600, 1.1, 0.17, 0.3, p); },
     raise: function (p) { tone('triangle', 740, 520, 0.09, 0.07, p); },
+    shine: function (p) { tone('sine', 1400, 3000, 0.1, 0.1, p); tone('triangle', 2100, 4200, 0.12, 0.05, p, 0.01); },
     blink: function (p) { noise('bandpass', 400, 5200, 0.9, 0.15, 0.28, p); tone('sine', 280, 1300, 0.12, 0.09, p); },
     parry: function (p) {
       tone('square', 1500, 1420, 0.32, 0.1, p); tone('sine', 2310, 2240, 0.42, 0.1, p);

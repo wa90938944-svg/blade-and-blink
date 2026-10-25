@@ -2,11 +2,11 @@
 // browser (local bot / 2-player / endless modes), so every mode plays identically.
 (function (root) {
   var W = 640, H = 400, R = 13, PAR = 0.32, A0 = 0.08, A1 = 0.22;
-  var REACH = 56, BLINK_D = 120, BLINK_REC = 0.3, CHARGE_T = 3.5, SPAWN_T = 5, SWING_CD = 0.2;
+  var REACH = 56, BLINK_D = 120, BLINK_REC = 0.3, CHARGE_T = 3.5, SPAWN_T = 5, SWING_CD = 0.2, BLINK_WIND = 0.1;
 
   function mk(i, x, fa, y) {
     return { i: i, x: x, y: y === undefined ? H / 2 : y, fa: fa, ch: 3, rc: 0, st: 0, sw: -1, hs: [],
-             pa: -1, bc: 0, sc: 0, dead: false, ix: 0, iy: 0, spd: 200 };
+             pa: -1, bc: 0, sc: 0, bw: 0, bdx: 0, bdy: 0, dead: false, ix: 0, iy: 0, spd: 200 };
   }
   function cl(v, a, b) { return Math.max(a, Math.min(b, v)); }
   function norm(a) { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI) a += 2 * Math.PI; return a; }
@@ -46,7 +46,7 @@
   function resolve(a, d, ev, blink) {
     if (parrying(d)) {
       if (blink) a.dead = true;
-      else { a.st = 1.1; a.sw = -1; }
+      else { a.st = 1.1; a.sw = -1; a.bw = 0; }
       ev.push({ t: 'parry', x: d.x, y: d.y, b: !!blink });
     } else d.dead = true;
   }
@@ -55,26 +55,34 @@
   function act(m, i, k, ev) {
     var p = m.p[i];
     if (p.dead || p.st > 0) return;
-    if (k === 'sw' && p.sw < 0 && p.pa < 0 && p.bc <= 0 && p.sc <= 0) {
+    if (k === 'sw' && p.sw < 0 && p.pa < 0 && p.bc <= 0 && p.sc <= 0 && p.bw <= 0) {
       p.sw = 0; p.hs = [];
       ev.push({ t: 'swing', i: i, x: p.x, y: p.y });
     }
-    else if (k === 'pa' && p.sw < 0 && p.pa < 0 && p.bc <= 0) {
+    else if (k === 'pa' && p.sw < 0 && p.pa < 0 && p.bc <= 0 && p.bw <= 0) {
       p.pa = 0;
       ev.push({ t: 'raise', i: i, x: p.x, y: p.y });
     }
-    else if (k === 'bl' && p.ch > 0 && p.bc <= 0 && p.pa < 0 && p.sw < 0) {
+    else if (k === 'bl' && p.ch > 0 && p.bc <= 0 && p.pa < 0 && p.sw < 0 && p.bw <= 0) {
       var dx = p.ix, dy = p.iy;
       if (!dx && !dy) { dx = Math.cos(p.fa); dy = Math.sin(p.fa); }
-      var l = Math.hypot(dx, dy) || 1; dx /= l; dy /= l;
-      var nx = cl(p.x + dx * BLINK_D, R, W - R), ny = cl(p.y + dy * BLINK_D, R, H - R);
-      ev.push({ t: 'blink', i: i, x1: p.x, y1: p.y, x2: nx, y2: ny });
-      var fs = foes(m, i);
-      for (var j = 0; j < fs.length && !p.dead; j++) {
-        if (!fs[j].dead && segd(p.x, p.y, nx, ny, fs[j].x, fs[j].y) < R + 8) resolve(p, fs[j], ev, true);
-      }
-      p.x = nx; p.y = ny; p.fa = Math.atan2(dy, dx); p.ch--; p.bc = BLINK_REC; p.sw = -1;
+      var l = Math.hypot(dx, dy) || 1;
+      p.bdx = dx / l; p.bdy = dy / l; p.fa = Math.atan2(p.bdy, p.bdx); // direction is locked in now
+      p.bw = BLINK_WIND; p.ch--;                                        // charge is spent when the shine starts
+      ev.push({ t: 'shine', i: i, x: p.x, y: p.y });
     }
+  }
+
+  // The dash itself, BLINK_WIND seconds after the shine began.
+  function dash(m, i, ev) {
+    var p = m.p[i];
+    var nx = cl(p.x + p.bdx * BLINK_D, R, W - R), ny = cl(p.y + p.bdy * BLINK_D, R, H - R);
+    ev.push({ t: 'blink', i: i, x1: p.x, y1: p.y, x2: nx, y2: ny });
+    var fs = foes(m, i);
+    for (var j = 0; j < fs.length && !p.dead; j++) {
+      if (!fs[j].dead && segd(p.x, p.y, nx, ny, fs[j].x, fs[j].y) < R + 8) resolve(p, fs[j], ev, true);
+    }
+    p.x = nx; p.y = ny; p.bc = BLINK_REC; p.sw = -1;
   }
 
   // Simple swarm AI: chase you, strafe when close, swing when facing you, sometimes parry.
@@ -125,6 +133,7 @@
       if (p.st > 0) p.st -= dt;
       if (p.bc > 0) p.bc -= dt;
       if (p.sc > 0) p.sc -= dt;
+      if (p.bw > 0) { p.bw -= dt; if (p.bw <= 0) { p.bw = 0; dash(m, i, ev); } }
       if (p.sw >= 0) { p.sw += dt; if (p.sw > 0.34) { p.sw = -1; p.sc = SWING_CD; } }
       if (p.pa >= 0) { p.pa += dt; if (p.pa > 0.8) p.pa = -1; }
     }
@@ -142,12 +151,12 @@
       p = m.p[i]; u = inp[i] || {};
       if (p.dead || p.st > 0) continue;
       l = Math.hypot(p.ix, p.iy);
-      if (p.sw < 0) {
+      if (p.sw < 0 && p.bw <= 0) {
         if (typeof u.aim === 'number' && isFinite(u.aim)) p.fa = u.aim;
         else if (l > 0) p.fa = Math.atan2(p.iy, p.ix);
       }
       if (l > 0) {
-        var sp = p.spd * (p.sw >= 0 ? 0.6 : 1) * (parrying(p) ? 0.5 : 1);
+        var sp = p.spd * (p.sw >= 0 ? 0.6 : 1) * (parrying(p) ? 0.5 : 1) * (p.bw > 0 ? 0.3 : 1);
         p.x = cl(p.x + p.ix * sp * dt, R, W - R);
         p.y = cl(p.y + p.iy * sp * dt, R, H - R);
       }
@@ -217,7 +226,7 @@
     return ev;
   }
 
-  var api = { W: W, H: H, R: R, PAR: PAR, A0: A0, A1: A1, REACH: REACH, CHARGE_T: CHARGE_T, SWING_CD: SWING_CD,
+  var api = { W: W, H: H, R: R, PAR: PAR, A0: A0, A1: A1, REACH: REACH, CHARGE_T: CHARGE_T, SWING_CD: SWING_CD, BLINK_D: BLINK_D, BLINK_WIND: BLINK_WIND,
               create: create, createEndless: createEndless, tick: tick };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Shared = api;
