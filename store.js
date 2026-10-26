@@ -32,8 +32,8 @@ function verifyPassword(password, stored) {
 function createStore(uri) {
   const client = new MongoClient(uri);
   let db, users;
+  const activeSessions = new Map(); // sh -> { key, tokenHash }
 
-  // Connect asynchronously in the background
   client.connect().then(() => {
     db = client.db();
     users = db.collection('users');
@@ -43,13 +43,41 @@ function createStore(uri) {
     console.error('MongoDB connection error:', err);
   });
 
+  async function waitForDb() {
+    while (!users) { await new Promise(r => setTimeout(r, 50)); }
+  }
+
+  function createSession(key) {
+    const token = crypto.randomBytes(32).toString('hex');
+    const sh = crypto.createHash('sha256').update(token).digest('hex');
+    const tokenHash = crypto.createHash('sha256').update('bb1|' + token).digest('hex');
+    activeSessions.set(sh, { key, tokenHash });
+    return { token, sh };
+  }
+
+  function sessionValid(sh, key) {
+    const s = activeSessions.get(sh);
+    return s && s.key === key;
+  }
+
+  function tokenMatches(token, sh) {
+    const s = activeSessions.get(sh);
+    if (!s) return false;
+    const h = crypto.createHash('sha256').update('bb1|' + token).digest('hex');
+    return crypto.timingSafeEqual(Buffer.from(h, 'hex'), Buffer.from(s.tokenHash, 'hex'));
+  }
+
+  function logout(sh) {
+    activeSessions.delete(sh);
+  }
+
   async function register(rawName, password) {
     const n = normalizeName(rawName);
     if (n.err) return n;
     if (typeof password !== 'string' || password.length < 8) {
       return { err: 'Password must be at least 8 characters' };
     }
-    while (!users) { await new Promise(r => setTimeout(r, 50)); }
+    await waitForDb();
 
     const existing = await users.findOne({ key: n.key });
     if (existing) return { err: 'That name is already taken' };
@@ -73,7 +101,8 @@ function createStore(uri) {
 
     try {
       await users.insertOne(doc);
-      return { ok: true, key: n.key };
+      const sess = createSession(n.key);
+      return { ok: true, key: n.key, token: sess.token, sh: sess.sh };
     } catch (e) {
       return { err: 'That name is already taken' };
     }
@@ -82,7 +111,7 @@ function createStore(uri) {
   async function login(rawName, password) {
     const n = normalizeName(rawName);
     if (n.err) return n;
-    while (!users) { await new Promise(r => setTimeout(r, 50)); }
+    await waitForDb();
 
     const user = await users.findOne({ key: n.key });
     if (!user) return { err: 'Account not found. Please register first.' };
@@ -92,29 +121,33 @@ function createStore(uri) {
     }
 
     await users.updateOne({ key: n.key }, { $set: { seen: Date.now() } });
-    return { ok: true, key: n.key };
+    const sess = createSession(n.key);
+    return { ok: true, key: n.key, token: sess.token, sh: sess.sh };
   }
 
-  async function changePassword(rawName, oldPassword, newPassword) {
-    const n = normalizeName(rawName);
-    if (n.err) return n;
-    if (typeof newPassword !== 'string' || newPassword.length < 8) {
-      return { err: 'New password must be at least 8 characters' };
+  function resume(token) {
+    if (typeof token !== 'string' || token.length < 16) return { err: 'Invalid token' };
+    const tokenHash = crypto.createHash('sha256').update('bb1|' + token).digest('hex');
+    for (const [sh, s] of activeSessions.entries()) {
+      if (crypto.timingSafeEqual(Buffer.from(s.tokenHash, 'hex'), Buffer.from(tokenHash, 'hex'))) {
+        return { key: s.key, sh };
+      }
     }
-    while (!users) { await new Promise(r => setTimeout(r, 50)); }
+    return { err: 'Session expired, please log in again' };
+  }
 
-    const user = await users.findOne({ key: n.key });
-    if (!user || !verifyPassword(oldPassword, user.passwordHash)) {
-      return { err: 'Incorrect current password' };
-    }
+  async function claim(token, password) {
+    return register(token, password);
+  }
 
-    const passwordHash = hashPassword(newPassword);
-    await users.updateOne({ key: n.key }, { $set: { passwordHash } });
-    return { ok: true };
+  async function saveData(key, equipped) {
+    await waitForDb();
+    await users.updateOne({ key }, { $set: { activeLook: equipped, seen: Date.now() } });
+    return { ok: true, savedAt: Date.now() };
   }
 
   async function profile(key) {
-    while (!users) { await new Promise(r => setTimeout(r, 50)); }
+    await waitForDb();
     const user = await users.findOne({ key });
     if (!user) return null;
     return {
@@ -132,17 +165,17 @@ function createStore(uri) {
   }
 
   async function record(winKey, loseKey) {
-    while (!users) { await new Promise(r => setTimeout(r, 50)); }
+    await waitForDb();
     const w = await users.findOne({ key: winKey });
     const l = await users.findOne({ key: loseKey });
-    if (!w || !l) return null;
+    if (!w || !l) return { win: { delta: WIN_MMR, oldRank: rankOf(START_MMR) }, lose: { delta: LOSS_MMR, oldRank: rankOf(START_MMR) } };
 
     const w0 = w.mmr, l0 = l.mmr, wr = rankOf(w0), lr = rankOf(l0);
     const newWMMR = w0 + WIN_MMR;
 
     await users.updateOne({ key: winKey }, {
       $inc: { mmr: WIN_MMR, wins: 1, games: 1, streak: 1 },
-      $set: { peak: Math.max(w.peak, newWMMR), seen: Date.now() }
+      $set: { peak: Math.max(w.peak || START_MMR, newWMMR), seen: Date.now() }
     });
 
     await users.updateOne({ key: loseKey }, {
@@ -154,7 +187,7 @@ function createStore(uri) {
   }
 
   async function top(n) {
-    while (!users) { await new Promise(r => setTimeout(r, 50)); }
+    await waitForDb();
     const list = await users.find({ games: { $gt: 0 } })
       .sort({ mmr: -1, wins: -1 })
       .limit(n)
@@ -168,7 +201,11 @@ function createStore(uri) {
     }));
   }
 
-  return { register, login, changePassword, profile, record, top };
+  async function flush() {
+    return true;
+  }
+
+  return { register, login, resume, claim, sessionValid, tokenMatches, logout, saveData, profile, record, top, flush };
 }
 
 module.exports = { createStore, rankOf, normalizeName, START_MMR, WIN_MMR, LOSS_MMR };
