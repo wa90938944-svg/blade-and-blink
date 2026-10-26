@@ -1,7 +1,15 @@
 (function () {
   'use strict';
   var S = Shared, W = S.W, H = S.H, R = S.R, PAR = S.PAR, A0 = S.A0, A1 = S.A1;
-  var $ = function (i) { return document.getElementById(i); };
+  var missing = [];
+  // a missing element must never take the whole game down (a stale cached page, a partial upload...):
+  // hand back a harmless stand-in and remember it so we can tell the player what is wrong
+  var $ = function (i) {
+    var e = document.getElementById(i);
+    if (e) return e;
+    if (missing.indexOf(i) < 0) missing.push(i);
+    return document.createElement('div');
+  };
   var cv = $('c'), ctx = cv.getContext('2d');
   var COL = ['#191514', '#c9331f'], GOLD = '#b8891f', PAPER = '#e8dfc9', INK = '#191514';
   var RANKS = [
@@ -19,7 +27,7 @@
   var fx = [], keys = {}, pend = [{}, {}], disp = [{ x: 0, y: 0 }, { x: 0, y: 0 }], snap = true;
   var lastPhase = '', lastScore = [0, 0], msg = '', msgT = 0, msgD = 1;
   var shake = 0, punch = 0, flash = 0, freeze = 0;
-  var mouse = { x: W / 2, y: H / 2 }, qT = 0, qI = null, bot = { x: 0, y: 0, t: 0 }, fArm = 0, tmpTok = '';
+  var mouse = { x: W / 2, y: H / 2 }, qT = 0, qI = null, bot = { x: 0, y: 0, t: 0 }, fArm = 0, cur = 'login', authMode = 'login', claimToken = '', toastT = 0;
   var calm = false; // respect "reduce motion": no shake, zoom punch or flashes
   try { calm = matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) {}
   var touch = false; // phones and tablets: show the on-screen stick and buttons
@@ -30,20 +38,8 @@
   function vib(ms) { try { if (touch && navigator.vibrate) navigator.vibrate(ms); } catch (e) {} }
 
   // ---------- account token: proves this browser owns its username ----------
-  function getToken() {
-    try {
-      var t = localStorage.getItem('bb_token');
-      if (!t) {
-        var a = new Uint8Array(16); crypto.getRandomValues(a);
-        t = Array.prototype.map.call(a, function (b) { return ('0' + b.toString(16)).slice(-2); }).join('');
-        localStorage.setItem('bb_token', t);
-      }
-      return t;
-    } catch (e) {
-      if (!tmpTok) tmpTok = Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2) + '0000000000000000';
-      return tmpTok;
-    }
-  }
+  function getToken() { try { return localStorage.getItem('bb_token') || ''; } catch (e) { return ''; } }
+  function setToken(t) { try { if (t) localStorage.setItem('bb_token', t); else localStorage.removeItem('bb_token'); } catch (e) {} }
 
   // ---------- screens & profile ----------
   function disarm() {
@@ -51,6 +47,7 @@
     var f = $('forfeit'); f.textContent = 'Forfeit'; f.classList.remove('arm');
   }
   function show(id) {
+    cur = id;
     document.querySelectorAll('.screen').forEach(function (e) { e.classList.toggle('on', e.id === id); });
     $('ov').style.display = id ? 'flex' : 'none';
     $('forfeit').hidden = !(id === null && mode);
@@ -62,6 +59,8 @@
     $('card').style.display = prof ? '' : 'none';
     $('rank').disabled = !prof;
     $('boardbtn').hidden = !sock;
+    $('savebtn').hidden = !prof;
+    $('logout').hidden = !prof;
     $('local').hidden = touch; // two players on one keyboard needs a keyboard
     show('lobby');
   }
@@ -75,7 +74,7 @@
     $('rname').style.color = r.c;
     $('mmr').textContent = p.mmr + ' MMR';
     $('wl').textContent = p.wins + 'W ' + p.losses + 'L' + (p.streak >= 2 ? '  \u00D7' + p.streak : '');
-    $('card').title = 'Peak ' + (p.peak || p.mmr) + ' MMR, ' + (p.games || 0) + ' games';
+    $('card').title = 'Peak ' + (p.peak || p.mmr) + ' MMR, ' + (p.games || 0) + ' games. Unlocked: ' + (p.unlocked || []).join(', ');
     var hasNext = r.next > r.min;
     $('prog').style.width = (hasNext ? Math.min(1, (p.mmr - r.min) / (r.next - r.min)) * 100 : 100) + '%';
     $('prog').style.background = r.c;
@@ -108,18 +107,91 @@
 
   // ---------- login / lobby / queue ----------
   try { $('name').value = localStorage.getItem('bb_name') || ''; } catch (e) {}
+
+  // brutalist notification: stark black block, thick border, hard shadow
+  function toast(text, bad) {
+    var t = $('toast');
+    t.textContent = text; t.className = bad ? 'bad' : ''; t.hidden = false;
+    clearTimeout(toastT);
+    toastT = setTimeout(function () { t.hidden = true; }, 2400);
+  }
+
+  // login | register | claim (an old account from before passwords: set a password for it)
+  function setAuthMode(m, name) {
+    authMode = m;
+    var reg = m !== 'login';
+    $('pass2').hidden = !reg;
+    $('pass').autocomplete = reg ? 'new-password' : 'current-password';
+    $('enter').textContent = m === 'login' ? 'Log in' : m === 'register' ? 'Create account' : 'Set password';
+    $('switch').textContent = m === 'login' ? 'New here? Create an account' : 'Have an account? Log in';
+    $('switch').hidden = m === 'claim';
+    $('authSub').textContent = m === 'claim' ? 'Welcome back, ' + name + '. Set a password to secure your account.'
+      : m === 'register' ? 'Pick a username and a password (8+ characters).' : 'Log in to climb the ranked ladder.';
+    if (name) $('name').value = name;
+    $('name').disabled = m === 'claim';
+    $('pass').value = ''; $('pass2').value = ''; $('err').textContent = '';
+  }
+  function signedIn(r) { // r: { token, profile } from the server
+    setToken(r.token);
+    try { localStorage.setItem('bb_name', r.profile.name); } catch (e) {}
+    $('pass').value = ''; $('pass2').value = '';
+    setProfile(r.profile);
+    showLobby();
+  }
+  function toLogin(msg) { // back to the login screen (session ended, logged out, ...)
+    prof = null; mode = null;
+    setAuthMode('login'); show('login');
+    if (msg) $('err').textContent = msg;
+  }
   $('enter').onclick = function () {
-    $('err').textContent = '';
-    if (!sock) { $('err').textContent = 'Server not reachable. Run npm start and open the page from it.'; return; }
-    var n = $('name').value.trim();
-    sock.emit('login', { name: n, token: getToken() }, function (r) {
-      if (r.err) { $('err').textContent = r.err; return; }
-      try { localStorage.setItem('bb_name', n); } catch (e) {}
-      setProfile(r.profile);
-      showLobby();
+    var err = $('err'); err.textContent = '';
+    if (!sock) { err.textContent = 'Server not reachable. Run npm start and open the page from it.'; return; }
+    var pw = $('pass').value, n = $('name').value.trim();
+    if (!n && authMode !== 'claim') { err.textContent = 'Enter a username'; return; }
+    if (!pw) { err.textContent = 'Enter a password'; return; }
+    if (authMode !== 'login') {
+      if (pw.length < 8) { err.textContent = 'Password must be at least 8 characters'; return; }
+      if (pw !== $('pass2').value) { err.textContent = 'Passwords do not match'; return; }
+    }
+    var b = $('enter'), settled = false;
+    b.disabled = true;
+    var wait = setTimeout(function () { if (!settled) { settled = true; b.disabled = false; err.textContent = 'No answer from the server, try again'; } }, 10000);
+    var done = function (r) {
+      if (settled) return;
+      settled = true; clearTimeout(wait); b.disabled = false;
+      if (!r || r.err) { err.textContent = (r && r.err) || 'Something went wrong'; $('pass').value = ''; $('pass2').value = ''; return; }
+      signedIn(r);
+    };
+    if (authMode === 'claim') sock.emit('claim', { token: claimToken, password: pw }, done);
+    else sock.emit(authMode === 'login' ? 'login' : 'register', { name: n, password: pw }, done);
+  };
+  $('switch').onclick = function () { setAuthMode(authMode === 'login' ? 'register' : 'login'); };
+  ['name', 'pass', 'pass2'].forEach(function (id) {
+    $(id).addEventListener('keydown', function (e) { if (e.key === 'Enter') $('enter').click(); });
+  });
+  $('logout').onclick = function () {
+    sock.emit('logout', function (r) {
+      if (r && r.err) { toast(r.err, true); return; }
+      setToken('');
+      toLogin('');
     });
   };
-  $('name').addEventListener('keydown', function (e) { if (e.key === 'Enter') $('enter').click(); });
+
+  // "Save Data": asks the server to write this account to disk. The server checks the live session and the
+  // session token; rating and unlocks are the server's own numbers, only the equipped cosmetics come from here.
+  function readEquipped() { try { return JSON.parse(localStorage.getItem('bb_equipped') || '{}') || {}; } catch (e) { return {}; } }
+  $('savebtn').onclick = function () {
+    var b = $('savebtn'), settled = false;
+    if (b.disabled) return;
+    b.disabled = true;
+    var wait = setTimeout(function () { if (!settled) { settled = true; b.disabled = false; toast('Save timed out', true); } }, 8000);
+    sock.emit('save', { token: getToken(), equipped: readEquipped() }, function (r) {
+      if (settled) return;
+      settled = true; clearTimeout(wait); b.disabled = false;
+      if (r && r.ok) { setProfile(r.profile); toast('Data Saved \u2713'); }
+      else toast('Save failed \u2717', true);
+    });
+  };
   $('offline').onclick = function () { prof = null; showLobby(); };
   $('rank').onclick = enterQueue;
   $('bot').onclick = function () { startLocal('bot'); };
@@ -198,13 +270,18 @@
   }
 
   if (sock) {
-    var relogin = function (n) {
-      if (!prof) return;
-      sock.emit('login', { name: prof.name, token: getToken() }, function (r) {
-        if (r.ok) setProfile(r.profile); else if (n < 5) setTimeout(function () { relogin(n + 1); }, 2000);
+    // on every (re)connect, pick the session back up from the token this browser holds
+    var resume = function (n) {
+      var t = getToken();
+      if (!t) return;
+      sock.emit('resume', { token: t }, function (r) {
+        if (r && r.ok) { setProfile(r.profile); if (cur === 'login') showLobby(); }
+        else if (r && r.legacy) { claimToken = t; setAuthMode('claim', r.name); if (cur === 'login') show('login'); }
+        else if (r && r.err === 'Please log in') { setToken(''); if (prof || cur !== 'login') toLogin('Your session ended, please log in again.'); }
+        else if (n < 5) setTimeout(function () { resume(n + 1); }, 2000);
       });
     };
-    sock.on('connect', function () { relogin(0); });
+    sock.on('connect', function () { resume(0); });
     sock.on('match', function (d) {
       clearInterval(qI);
       mode = 'online'; lastKind = 'online'; me = d.you; names = d.names; M = null;
@@ -230,10 +307,8 @@
       result(won ? 'Victory' : 'Defeat', why + names[0] + ' ' + d.score[0] + ' - ' + d.score[1] + ' ' + names[1],
         line, (d.delta > 0 ? '+' : '') + d.delta + ' MMR', won ? 'win' : 'lose');
     });
-    sock.on('kicked', function () {
-      mode = null; prof = null;
-      show('login'); $('err').textContent = 'You signed in somewhere else.';
-    });
+    sock.on('kicked', function () { toLogin('You signed in somewhere else.'); });
+    sock.on('unauth', function () { setToken(''); toLogin('Your session ended, please log in again.'); });
     sock.on('disconnect', function () {
       if (mode === 'online') { mode = null; result('Disconnected', 'Lost connection to the server.', '', '', 'lose'); }
     });
@@ -677,6 +752,15 @@
   if (touch) {
     $('legend').hidden = true;
     $('hint').textContent = 'Drag the left stick to move and aim. Tap Swing, Parry and Blink. Landscape gives you more room.';
+  }
+  if (missing.length) {
+    console.error('Blade & Blink: this page is missing elements the script needs: ' + missing.join(', '));
+    try {
+      var note = document.createElement('div');
+      note.textContent = 'This page and its script are different versions (missing: ' + missing.join(', ') + '). Hard refresh with Ctrl+Shift+R, or upload every file together.';
+      note.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:99;background:#c9331f;color:#efe6d2;padding:8px 12px;font:600 15px sans-serif;text-align:center';
+      document.body.appendChild(note);
+    } catch (e) {}
   }
   requestAnimationFrame(loop);
 })();

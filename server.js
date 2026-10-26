@@ -4,7 +4,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { Server } = require('socket.io');
 const G = require('./public/shared.js');
-const { createStore, rankOf, normalizeName } = require('./store.js');
+const { createStore, rankOf } = require('./store.js');
 
 const PORT = process.env.PORT || 3000;
 const WIN_ROUNDS = 5; // first to 5 = best of 9
@@ -13,7 +13,9 @@ const WIN_ROUNDS = 5; // first to 5 = best of 9
 const store = createStore(process.env.DATA_DIR || path.join(__dirname, 'data'), path.join(__dirname, 'players.json'));
 
 const app = express();
-app.use(express.static(path.join(__dirname, 'public')));
+// no-cache = the browser re-checks with the server on every load (cheap 304 when unchanged), so a page can never be
+// stuck on an old index.html or client.js after a deploy
+app.use(express.static(path.join(__dirname, 'public'), { setHeaders: (res) => res.setHeader('Cache-Control', 'no-cache') }));
 const server = http.createServer(app);
 const io = new Server(server);
 
@@ -86,33 +88,101 @@ setInterval(() => io.emit('stats', { online: io.engine.clientsCount, queue: queu
 
 // ---------- sockets ----------
 const num = (v, lo, hi) => { v = +v; return Number.isFinite(v) ? Math.max(lo, Math.min(hi, v)) : 0; };
-function limiter(max) { // allow at most `max` events per second
+function limiter(max, ms) { // allow at most `max` events per window (default one second)
+  ms = ms || 1000;
   let n = 0, t = Date.now();
-  return () => { const now = Date.now(); if (now - t >= 1000) { t = now; n = 0; } return ++n <= max; };
+  return () => { const now = Date.now(); if (now - t >= ms) { t = now; n = 0; } return ++n <= max; };
+}
+function ipOf(s) {
+  const h = s.handshake || {}, xf = h.headers && h.headers['x-forwarded-for'];
+  // behind Render's proxy every socket shares the proxy's address, so use the one the proxy appended (the last entry)
+  if (xf && (process.env.RENDER || process.env.TRUST_PROXY)) return String(xf).split(',').pop().trim();
+  return h.address || 'unknown';
+}
+// a socket is signed in only while its session is still valid on the server (logout / expiry revokes it)
+const authed = (s, token) => !!s.data.key && store.sessionValid(s.data.sh, s.data.key) && (token === undefined || store.tokenMatches(token, s.data.sh));
+function enter(s, r) {
+  for (const other of io.sockets.sockets.values()) { // one live session per account: the newest wins
+    if (other !== s && other.data.key === r.key) { other.emit('kicked'); other.disconnect(true); }
+  }
+  queue = queue.filter((q) => q.s !== s);
+  s.data.key = r.key; s.data.sh = r.sh;
+}
+function handle(cb, fn) { // runs an async handler and always answers, even on an unexpected error
+  if (typeof cb !== 'function') return;
+  Promise.resolve().then(fn).catch((e) => { console.error(e); cb({ err: 'Server error, please try again' }); });
 }
 
 io.on('connection', (s) => {
   const okIn = limiter(120), okAct = limiter(30);
 
-  s.on('login', (d, cb) => {
-    if (typeof cb !== 'function') return;
-    if (typeof d === 'string') d = { name: d };
-    d = d || {};
+  const okAuth = limiter(10, 60000), okSave = limiter(5);
+
+  // ----- accounts: a name is only ever entered with its password (or a session token issued by this server) -----
+  s.on('register', (d, cb) => handle(cb, async () => {
+    if (!okAuth()) return cb({ err: 'Slow down for a moment' });
     if (s.data.room) return cb({ err: 'Finish your match first' });
-    const n = normalizeName(d.name);
-    if (n.err) return cb({ err: n.err });
-    const r = store.login(d.name, d.token);   // refuses names owned by someone else
+    d = d || {};
+    const r = await store.register(d.name, d.password, ipOf(s));
     if (r.err) return cb({ err: r.err });
-    for (const other of io.sockets.sockets.values()) {
-      if (other !== s && other.data.key === r.key) { other.emit('kicked'); other.disconnect(true); } // same player, new session
-    }
+    enter(s, r);
+    cb({ ok: true, profile: store.profile(r.key), token: r.token });
+  }));
+
+  s.on('login', (d, cb) => handle(cb, async () => {
+    if (!okAuth()) return cb({ err: 'Slow down for a moment' });
+    if (s.data.room) return cb({ err: 'Finish your match first' });
+    d = d || {};
+    if (d.password === undefined && d.token !== undefined) return cb({ err: 'Your game page is out of date. Hard refresh with Ctrl+Shift+R.' });
+    const r = await store.login(d.name, d.password, ipOf(s));
+    if (r.err) return cb({ err: r.err });
+    enter(s, r);
+    cb({ ok: true, profile: store.profile(r.key), token: r.token });
+  }));
+
+  s.on('resume', (d, cb) => handle(cb, async () => {
+    if (!okAuth()) return cb({ err: 'Slow down for a moment' });
+    if (s.data.room) return cb({ err: 'Finish your match first' });
+    d = d || {};
+    const r = store.resume(d.token);
+    if (r.legacy) return cb({ legacy: true, name: r.name });   // an account from before passwords: set one
+    if (r.err) return cb({ err: r.err });
+    enter(s, r);
+    cb({ ok: true, profile: store.profile(r.key), token: d.token });
+  }));
+
+  s.on('claim', (d, cb) => handle(cb, async () => {
+    if (!okAuth()) return cb({ err: 'Slow down for a moment' });
+    d = d || {};
+    const r = await store.claim(d.token, d.password, ipOf(s));
+    if (r.err) return cb({ err: r.err });
+    enter(s, r);
+    cb({ ok: true, profile: store.profile(r.key), token: r.token });
+  }));
+
+  s.on('logout', (cb) => {
+    const done = typeof cb === 'function' ? cb : () => {};
+    if (s.data.room) return done({ err: 'Finish your match first' });
+    if (s.data.sh) store.logout(s.data.sh);
     queue = queue.filter((q) => q.s !== s);
-    s.data.key = r.key;
-    cb({ ok: true, profile: store.profile(r.key) });
+    s.data.key = s.data.sh = undefined;
+    done({ ok: true });
+  });
+
+  // "Save Data": needs this socket's live session AND the session token itself, so a stolen socket id is not enough
+  s.on('save', (d, cb) => {
+    if (typeof cb !== 'function') return;
+    if (!okSave()) return cb({ err: 'Slow down for a moment' });
+    d = d || {};
+    if (!authed(s, typeof d.token === 'string' ? d.token : '')) { s.emit('unauth'); return cb({ err: 'Please log in again' }); }
+    const r = store.saveData(s.data.key, d.equipped);
+    if (r.err) return cb({ err: r.err });
+    cb({ ok: true, savedAt: r.savedAt, profile: store.profile(s.data.key) });
   });
 
   s.on('queue', () => {
-    if (!s.data.key || s.data.room || queue.some((q) => q.s === s)) return;
+    if (s.data.room || queue.some((q) => q.s === s)) return;
+    if (!authed(s)) { s.emit('unauth'); return; }
     const p = store.profile(s.data.key);
     queue.push({ s, key: s.data.key, name: p.name, mmr: p.mmr, since: Date.now() });
     tryMatch();
