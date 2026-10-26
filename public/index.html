@@ -65,6 +65,13 @@ button:focus-visible{outline:3px solid var(--gold);outline-offset:3px}
 #boardlist li{display:flex;justify-content:space-between;gap:12px;padding:6px 10px;border-bottom:1px solid var(--line);font-weight:600;letter-spacing:.04em;text-transform:uppercase}
 #boardlist li.me{background:var(--panel);color:var(--gold)}
 .stats{min-height:20px;font-size:14px}
+/* wardrobe look grid */
+#lookgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;width:100%;max-height:220px;overflow:auto}
+.look{display:flex;flex-direction:column;align-items:center;gap:4px;background:var(--panel);border:2px solid var(--line);padding:8px;cursor:pointer;width:100%;box-shadow:none}
+.look.sel{border-color:var(--gold);background:#252019}
+.look canvas{background:transparent}
+.look span{font-size:14px;font-weight:700}
+.look small{font-size:11px;color:var(--dim)}
 #pad{width:min(94vw,520px);display:flex;justify-content:space-between;align-items:center;gap:10px;touch-action:none;-webkit-touch-callout:none}
 #stick{position:relative;flex:none;width:clamp(104px,32vw,150px);aspect-ratio:1;border:3px solid var(--bone);border-radius:50%;background:rgba(27,24,20,.88);box-shadow:4px 4px 0 var(--red);touch-action:none}
 #stick::before,#stick::after{content:"";position:absolute;background:var(--line)}
@@ -107,10 +114,13 @@ button:focus-visible{outline:3px solid var(--gold);outline-offset:3px}
     <div id="ov">
       <div class="screen on" id="login">
         <h1>Blade <span>&amp;</span> Blink</h1>
-        <p>One hit kills. Pick a name and climb the ranked ladder.</p>
-        <input id="name" maxlength="16" placeholder="Your name" autocomplete="off" aria-label="Username">
+        <p id="authSub">Log in to climb the ranked ladder.</p>
+        <input id="name" maxlength="16" placeholder="Username" autocomplete="username" aria-label="Username">
+        <input id="pass" type="password" maxlength="64" placeholder="Password (8+ chars)" autocomplete="current-password" aria-label="Password">
+        <input id="pass2" type="password" maxlength="64" placeholder="Confirm password" autocomplete="new-password" aria-label="Confirm password" hidden>
         <div class="err" id="err" role="alert"></div>
-        <button id="enter">Enter the arena</button>
+        <button id="enter">Log in</button>
+        <button class="ghost" id="switch">New here? Create an account</button>
         <button class="ghost" id="offline">Play offline without an account</button>
       </div>
       <div class="screen" id="lobby">
@@ -126,7 +136,8 @@ button:focus-visible{outline:3px solid var(--gold);outline-offset:3px}
         <button id="rank">Find Ranked Match</button>
         <div class="row"><button class="sec" id="bot">Duel the bot</button><button class="sec" id="local">2 players, one keyboard</button></div>
         <button class="sec" id="endless">Endless bot mode</button>
-        <button class="ghost" id="boardbtn" hidden>Leaderboard</button>
+        <div class="row"><button class="sec" id="lookbtn">Wardrobe</button><button class="sec" id="savebtn">Save Data</button></div>
+        <div class="row"><button class="ghost" id="boardbtn" hidden>Leaderboard</button><button class="ghost" id="logout" hidden>Log out</button></div>
         <p id="hint">Ranked: WASD move, mouse aims, click swings, right-click or E parries, Space blinks.</p>
         <p class="stats"></p>
       </div>
@@ -142,6 +153,12 @@ button:focus-visible{outline:3px solid var(--gold);outline-offset:3px}
         <h2>Top ladder</h2>
         <ol id="boardlist"></ol>
         <button class="sec" id="boardback">Back</button>
+      </div>
+      <div class="screen" id="wardrobe">
+        <h2>Wardrobe</h2>
+        <p id="lookinfo">Pick a look to wear into battle.</p>
+        <div id="lookgrid"></div>
+        <button class="sec" id="lookback">Back</button>
       </div>
       <div class="screen" id="result">
         <h2 id="rt">Victory</h2>
