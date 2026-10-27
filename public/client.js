@@ -35,7 +35,7 @@
   var godActive = false, noCdActive = false;
 
   var selectedTier = 'novice';
-  var lastDefeatedTier = null;
+  var apexConquered = false;
   var isBossEncounter = false;
   var bossDialogueT = 0;
   var cam = { x: W / 2, y: H / 2 };
@@ -585,6 +585,10 @@
     if (mode) show(null);
     else showLobby();
   };
+  $('admFightTetanus').onclick = function () {
+    if (!prof || !prof.isOwner) return;
+    startBotDuel('tetanus');
+  };
 
   function loadAdminUserList() {
     var list = $('adminUserList');
@@ -782,17 +786,42 @@
     show(null); hud();
   }
 
+  function decorateTetanusArena() {
+    for (var s = 0; s < 14; s++) {
+      var bx = 60 + Math.random() * (W - 120);
+      var by = 50 + Math.random() * (H - 100);
+      splat(bx, by, '#5c0a06', 14 + Math.random() * 18);
+      stain(bx, by, '#4a0704', 12, 36);
+    }
+    bossDialogueT = 2.6;
+    shake = 16;
+    snd('gong');
+  }
+
+  function triggerTetanusAmbush() {
+    apexConquered = false;
+    isBossEncounter = true;
+    selectedTier = 'tetanus';
+    M = S.create(1, '1v1', 'tetanus');
+    names = ['You', 'TETANUS'];
+    disp = [];
+    snap = true;
+    lastPhase = '';
+    lastScore = [0, 0];
+    decorateTetanusArena();
+    hud();
+  }
+
   function startBotDuel(tier) {
     selectedTier = tier;
     lastKind = 'bot';
     var activeTier = tier;
-    isBossEncounter = false;
+    isBossEncounter = (tier === 'tetanus');
 
-    // 10% chance when starting a match against Novice CPU immediately after defeating Apex CPU
-    if (tier === 'novice' && lastDefeatedTier === 'apex' && Math.random() < 0.10) {
+    if (tier === 'novice' && apexConquered && Math.random() < 0.25) {
       activeTier = 'tetanus';
       isBossEncounter = true;
-      lastDefeatedTier = null;
+      apexConquered = false;
     }
 
     mode = 'bot'; vs = null; me = 0;
@@ -806,15 +835,7 @@
     beginView();
 
     if (isBossEncounter) {
-      for (var s = 0; s < 14; s++) {
-        var bx = 60 + Math.random() * (W - 120);
-        var by = 50 + Math.random() * (H - 100);
-        splat(bx, by, '#5c0a06', 14 + Math.random() * 18);
-        stain(bx, by, '#4a0704', 12, 36);
-      }
-      bossDialogueT = 2.5;
-      shake = 14;
-      snd('gong');
+      decorateTetanusArena();
     }
   }
 
@@ -1513,13 +1534,21 @@
   }
   function finishLocal() {
     var w = M.winner, k = mode;
+    if (k === 'bot' && w === 0) {
+      var defeatedTier = M.p[1] ? M.p[1].tier : selectedTier;
+      if (defeatedTier === 'apex') {
+        apexConquered = true;
+      } else if (defeatedTier === 'novice' && apexConquered) {
+        // When you kill the Novice bot after conquering Apex, Tetanus ambushes you!
+        triggerTetanusAmbush();
+        return;
+      }
+    }
     mode = null;
     if (k === 'endless') {
       endResult();
     } else if (k === 'bot') {
       var won = w === 0;
-      var defeatedTier = M.p[1] ? M.p[1].tier : selectedTier;
-      if (won) lastDefeatedTier = defeatedTier;
       var sub = isBossEncounter
         ? (won ? 'You conquered the secret boss Tetanus!' : 'Crushed by Tetanus.')
         : (won ? 'All ' + M.p[1].maxLives + ' CPU lives depleted.' : 'Remaining CPU lives: ' + M.p[1].lives + '/' + M.p[1].maxLives);
