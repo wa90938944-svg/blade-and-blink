@@ -160,7 +160,6 @@
         ev.push({ t: 'lose_life', i: target.i, x: target.x, y: target.y, lives: target.lives });
       }
     } else {
-      // Brief flinch when losing a heart so multi-heart bots can't instantly swing through your hit
       target.st = Math.max(target.st, 0.35);
       target.sw = -1;
       target.pa = -1;
@@ -187,7 +186,7 @@
         ev.push({ t: 'intercept', by: d.i, victim: a.i, x: d.x, y: d.y });
       } else {
         if (!a.god) {
-          a.st = 1.35; // Generous stun window so player can counter-attack easily
+          a.st = 1.35;
           a.sw = -1;
           a.pa = -1;
           a.bw = 0;
@@ -209,7 +208,6 @@
   function act(m, i, k, ev) {
     var p = m.p[i];
     if (!p || p.dead || (!p.noCd && p.st > 0)) return;
-    // Allow cancelling an active parry window (p.pa < PAR) directly into a swing or blink
     var canCancelParry = p.pa < 0 || p.pa < PAR;
     if (k === 'sw' && (p.noCd || (p.sw < 0 && canCancelParry && p.bc <= 0 && p.sc <= 0 && p.bw <= 0))) {
       p.pa = -1; p.whiffedParry = false;
@@ -330,7 +328,7 @@
     }
   }
 
-  // 1. Novice CPU: Casual, low-accuracy, randomized timing
+  // 1. Novice CPU
   function aiNovice(m, b, dt) {
     var a = m.p[0], o = {};
     b.at -= dt;
@@ -354,7 +352,7 @@
     return o;
   }
 
-  // 2. Veteran CPU: Reactive Parry & Predictive Dash
+  // 2. Veteran CPU
   function aiVeteran(m, b, dt) {
     var a = m.p[0], o = {};
     b.at -= dt;
@@ -386,7 +384,7 @@
     return o;
   }
 
-  // 3. Apex CPU: Challenging but fair (human-like reaction window, 48% parry rate, punishable swings)
+  // 3. Apex CPU
   function aiApex(m, b, dt) {
     var a = m.p[0], o = {};
     b.at -= dt;
@@ -396,11 +394,9 @@
       var face = Math.cos(b.fa) * ux + Math.sin(b.fa) * uy;
       b.ax = ux; b.ay = uy;
 
-      // Reactive parry on tick (48% chance so player can land hits and bait parries)
       if (a.sw >= 0 && a.sw < 0.22 && d < a.reach + b.r + 14 && b.pa < 0 && b.sw < 0 && b.bw <= 0 && Math.random() < 0.48) {
         o.pa = true;
       }
-      // Predictive dash-kill check (35% chance on tick when aligned)
       else if (b.ch > 0 && b.bc <= 0 && b.sw < 0 && b.pa < 0 && d > 55 && d <= BLINK_D + 8 && Math.random() < 0.35) {
         var fx2 = b.x + ux * BLINK_D, fy2 = b.y + uy * BLINK_D;
         if (segd(b.x, b.y, fx2, fy2, a.x, a.y) < b.r + a.r - 3 && !parrying(a)) {

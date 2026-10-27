@@ -1025,19 +1025,19 @@
       } else if (e.t === 'parry') {
         burst(e.x, e.y, GOLD, 26); ring(e.x, e.y, GOLD, R + 60, 0.45, 5); stain(e.x, e.y, GOLD, 8, 18);
         say(e.b ? 'Dash punished!' : 'Parried!', 0.8);
-        shake = 7; punch = 0.02; hitStop(0.08); snd('parry', e.x); vib(15);
+        shake = 7; punch = 0.02; snd('parry', e.x); vib(15);
       } else if (e.t === 'hurt') {
         c = COL[teams[e.i] || 0];
         burst(e.x, e.y, c, 14);
         stain(e.x, e.y, isBossEncounter ? '#5c0a06' : c, 10, 24);
-        shake = 6; punch = 0.015; hitStop(0.05); snd('kill', e.x);
+        shake = 6; punch = 0.015; snd('kill', e.x);
       } else if (e.t === 'lose_life') {
         c = COL[teams[e.i] || 0];
         shatter(e.x, e.y, c, 10);
         ring(e.x, e.y, c, R + 55, 0.45, 5);
         splat(e.x, e.y, isBossEncounter ? '#5c0a06' : c, 16);
         say((e.i === 0 ? 'You: ' : '') + e.lives + (e.lives === 1 ? ' Life Left!' : ' Lives Left!'), 0.9);
-        shake = 9; punch = 0.025; hitStop(0.09);
+        shake = 9; punch = 0.025;
       } else if (e.t === 'whiff_parry') {
         ring(e.x, e.y, '#c9331f', R + 45, 0.4, 4);
         say('Parry Whiffed! Punish!', 0.9);
@@ -1401,7 +1401,7 @@
         ctx.globalAlpha = 1;
       }
       if (p.pa >= 0) {
-        var on = p.pa < PAR;
+        var on = p.st <= 0 && p.pa < PAR;
         ctx.strokeStyle = on ? GOLD : 'rgba(184,137,31,.3)'; ctx.lineWidth = on ? 4 : 2;
         ctx.beginPath(); ctx.arc(px, py, pR + 9 + (on ? p.pa * 20 : 0), 0, 7); ctx.stroke();
       }
@@ -1539,7 +1539,6 @@
       if (defeatedTier === 'apex') {
         apexConquered = true;
       } else if (defeatedTier === 'novice' && apexConquered) {
-        // When you kill the Novice bot after conquering Apex, Tetanus ambushes you!
         triggerTetanusAmbush();
         return;
       }
