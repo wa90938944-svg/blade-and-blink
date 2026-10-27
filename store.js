@@ -11,11 +11,11 @@ const START_MMR = 300, WIN_MMR = 25, LOSS_MMR = 20;
 const SESSION_MS = 30 * 24 * 3600 * 1000, MAX_SESSIONS = 8;
 const RESERVED = new Set(['bot', 'bots', 'you', 'p1', 'p2', 'admin', 'server', 'system', '__proto__']);
 const RANK_NAMES = ['Bronze', 'Silver', 'Gold', 'Platinum', 'Diamond'];
-// The "look" slot: reaching a rank unlocks the look of the same name. 'none' (the bare circle) is always available.
+// The "look" slot: reaching a rank unlocks the look. 'none' is always available.
 // slot -> { cosmetic id: rank needed to unlock it }
-const COSMETICS = { look: { none: 'Bronze', bronze: 'Bronze', silver: 'Silver', gold: 'Gold', platinum: 'Platinum', diamond: 'Diamond' } };
-const LOOK_ORDER = ['bronze', 'silver', 'gold', 'platinum', 'diamond'];
-const topLook = (unlocked) => { let t = 'bronze'; for (const id of LOOK_ORDER) if (unlocked.includes(id)) t = id; return t; };
+const COSMETICS = { look: { none: 'Bronze', bronze: 'Silver', silver: 'Silver', gold: 'Gold', platinum: 'Platinum', diamond: 'Diamond' } };
+const LOOK_ORDER = ['none', 'bronze', 'silver', 'gold', 'platinum', 'diamond'];
+const topLook = (unlocked) => { let t = 'none'; for (const id of LOOK_ORDER) if (unlocked.includes(id)) t = id; return t; };
 // OWASP's scrypt option "N=2^15, r=8, p=3". Parameters are stored inside every hash, so they can be raised later.
 const SCRYPT = { N: 1 << 15, r: 8, p: 3, keylen: 32 };
 
@@ -23,7 +23,7 @@ const SCRYPT = { N: 1 << 15, r: 8, p: 3, keylen: 32 };
 const rankOf = (mmr) => (mmr >= 2000 ? 'Diamond' : mmr >= 1500 ? 'Platinum' : mmr >= 1000 ? 'Gold' : mmr >= 500 ? 'Silver' : 'Bronze');
 const unlocksFor = (peak) => {
   const r = RANK_NAMES.indexOf(rankOf(peak)), out = [];
-  if (r < 0) return ['none', 'bronze'];
+  if (r < 0) return ['none'];
   for (const slot of Object.keys(COSMETICS)) {
     for (const id of Object.keys(COSMETICS[slot])) {
       const req = RANK_NAMES.indexOf(COSMETICS[slot][id]);
@@ -80,7 +80,7 @@ function createStore(dir, legacyFile, opts) {
     const wins = num(p.wins), losses = num(p.losses), peak = Math.max(num(p.peak), mmr);
     const earned = unlocksFor(peak);
     const unlocked = Array.from(new Set((Array.isArray(p.unlocked) ? p.unlocked : []).filter(isCosmetic).concat(earned)));
-    const want = p.equipped && p.equipped.look;   // an account with no valid choice wears the best look it has earned
+    const want = p.equipped && p.equipped.look;
     const equipped = { look: typeof want === 'string' && Object.prototype.hasOwnProperty.call(COSMETICS.look, want) && unlocked.includes(want) ? want : topLook(unlocked) };
     return {
       name: String(p.name || key).slice(0, 16), mmr, peak, wins, losses, games: Math.max(num(p.games), wins + losses),
@@ -153,7 +153,7 @@ function createStore(dir, legacyFile, opts) {
     } catch (e) { return false; }
   }
   const getDummy = () => dummy || (dummy = hashPassword('dummy-password-for-constant-time'));
-  getDummy().catch(() => {}); // computed up front so the first unknown-name login is not slower than the rest
+  getDummy().catch(() => {});
 
   // ----- brute-force limits (in memory) -----
   const fails = new Map(), signups = new Map();
@@ -162,7 +162,7 @@ function createStore(dir, legacyFile, opts) {
     if (fails.size > 5000) fails.clear();
     let f = fails.get(id);
     if (!f || now() - f.first > 600000) f = { n: 0, first: now(), until: 0 };
-    if (++f.n >= max) f.until = now() + 300000;   // 5 minute lock after `max` misses in 10 minutes
+    if (++f.n >= max) f.until = now() + 300000;
     fails.set(id, f);
   }
   function signupLimited(ip) {
@@ -186,7 +186,6 @@ function createStore(dir, legacyFile, opts) {
   const tokenMatches = (token, sh) => typeof token === 'string' && sameHex(hashSession(token), sh);
   function logout(sh) { if (sessions[sh]) { delete sessions[sh]; save(); } }
 
-  // Picks a session back up from the token in the browser. Old accounts that predate passwords are asked to set one.
   function resume(token) {
     if (typeof token !== 'string' || token.length < 16 || token.length > 128) return { err: 'Please log in' };
     const sh = hashSession(token), s = sessions[sh];
@@ -208,10 +207,10 @@ function createStore(dir, legacyFile, opts) {
     if (p && p.th) return { err: 'That name belongs to an existing player. Open the game in the browser you played on to secure it.' };
     if (signupLimited(ip)) return { err: 'Too many sign-ups from this network. Try again later.' };
     const ph = await hashPassword(password);
-    p = players[n.key];                                    // someone may have registered while we were hashing
+    p = players[n.key];
     if (p && (p.ph || p.th)) return { err: 'That name is already taken' };
     if (!p) p = players[n.key] = migrate(n.key, { name: n.name, mmr: START_MMR });
-    p.ph = ph; p.seen = now();                             // an old unclaimed record (no owner) keeps its rating
+    p.ph = ph; p.seen = now();
     return issue(n.key);
   }
   async function login(rawName, password, ip) {
@@ -222,13 +221,11 @@ function createStore(dir, legacyFile, opts) {
     if (wait) return { err: 'Too many attempts. Try again in ' + Math.ceil(wait / 60) + ' min.' };
     if (typeof password !== 'string' || password.length > 128) { fail(addr, 20); return generic; }
     const p = n.err ? null : players[n.key];
-    // unknown names cost the same time as wrong passwords, so response time does not reveal which accounts exist
     const good = await verifyPassword(password, p && p.ph ? p.ph : await getDummy());
     if (!(p && p.ph && good)) { fail(addr, 20); if (acct) fail(acct, 5); return generic; }
     fails.delete(acct); p.seen = now();
     return issue(n.key);
   }
-  // an account from before passwords existed: the browser that owns it proves so with its old token, then sets a password
   async function claim(oldToken, password, ip) {
     const lk = typeof oldToken === 'string' ? legacy.get(hashToken(oldToken)) : null;
     if (!lk || !players[lk] || players[lk].ph) return { err: 'Please log in' };
@@ -255,8 +252,7 @@ function createStore(dir, legacyFile, opts) {
     w.streak++; l.streak = 0;
     w.peak = Math.max(w.peak, w.mmr);
     const prevTop = topLook(w.unlocked);
-    w.unlocked = Array.from(new Set(w.unlocked.concat(unlocksFor(w.peak)))); // unlocks are kept even if you are demoted later
-    // moving up a rank: switch to the new look, unless the player had picked something other than their best one
+    w.unlocked = Array.from(new Set(w.unlocked.concat(unlocksFor(w.peak))));
     if (w.equipped.look === prevTop && topLook(w.unlocked) !== prevTop) w.equipped.look = topLook(w.unlocked);
     save();
     return { win: { delta: w.mmr - w0, oldRank: wr }, lose: { delta: l.mmr - l0, oldRank: lr } };
@@ -266,8 +262,6 @@ function createStore(dir, legacyFile, opts) {
       .sort((a, b) => b.mmr - a.mmr || b.wins - a.wins).slice(0, n)
       .map((p) => ({ name: p.name, mmr: p.mmr, rank: rankOf(p.mmr), wins: p.wins, losses: p.losses }));
   }
-  // The "Save Data" button: rating and unlocks are the server's own numbers (never taken from the client);
-  // the client may only choose which unlocked cosmetics are equipped. Forces a write to disk.
   function saveData(key, equipped) {
     const p = players[key];
     if (!p) return { err: 'No such account' };
@@ -283,7 +277,6 @@ function createStore(dir, legacyFile, opts) {
     return { ok: true, savedAt: p.savedAt };
   }
 
-  // choose which unlocked look to wear (takes effect for the next match)
   function equip(key, id) {
     const p = players[key];
     if (!p) return { err: 'No such account' };
