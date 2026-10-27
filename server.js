@@ -18,9 +18,20 @@ const io = new Server(server);
 
 // ---------- Matchmaking & State ----------
 let queue = [];
-let ffaQueue = [];
 const rooms = new Map();
 const parties = new Map();
+
+// Slither.io style persistent 24/7 drop-in/drop-out FFA World
+const ffaWorld = {
+  id: 'ffa_world',
+  users: [],
+  m: G.createFFA(),
+  inp: [],
+  meta: [],
+  mode: 'ffa',
+  ffa: true
+};
+rooms.set(ffaWorld.id, ffaWorld);
 
 function generatePartyCode() {
   var code;
@@ -42,11 +53,6 @@ function tryMatch() {
         return tryMatch();
       }
     }
-  }
-
-  if (ffaQueue.length >= 2) {
-    const batch = ffaQueue.splice(0, 4);
-    startFFARoom(batch);
   }
 }
 setInterval(tryMatch, 1000);
@@ -80,30 +86,70 @@ async function startRoom(users, mode, unranked) {
   console.log(`[room ${id}] ${mode} started: ${names.join(', ')}`);
 }
 
-async function startFFARoom(users) {
-  const id = crypto.randomBytes(4).toString('hex');
-  const matchObj = G.createFFA(users);
-  const inps = users.map(() => ({}));
-  const room = { id, users, m: matchObj, inp: inps, done: false, mode: 'ffa', ffa: true };
-  rooms.set(id, room);
+// Slither-style immediate drop-in
+async function joinFFA(user) {
+  const m = ffaWorld.m;
+  const prof = await store.profile(user.key);
+  const look = (prof && prof.equipped && prof.equipped.look) || 'none';
+  const rx = 100 + Math.random() * (G.FFA_W - 200);
+  const ry = 100 + Math.random() * (G.FFA_H - 200);
 
-  const names = users.map(u => u.name);
-  const ranks = users.map(u => rankOf(u.mmr, u.name));
-  const mmrs = users.map(u => u.mmr);
-  const looks = [];
-  for (let i = 0; i < users.length; i++) {
-    const prof = await store.profile(users[i].key);
-    looks.push((prof && prof.equipped && prof.equipped.look) || 'none');
+  let slot = -1;
+  for (let i = 0; i < ffaWorld.users.length; i++) {
+    if (!ffaWorld.users[i]) { slot = i; break; }
   }
 
-  const info = { id, names, ranks, mmrs, looks, mode: 'ffa', shrines: matchObj.shrines };
-  users.forEach((u, i) => {
-    u.s.join(id);
-    u.s.data.room = room;
-    u.s.data.idx = i;
-    u.s.emit('match', Object.assign({ you: i }, info));
+  if (slot === -1) {
+    slot = ffaWorld.users.length;
+    ffaWorld.users.push(user);
+    ffaWorld.inp.push({});
+    ffaWorld.meta.push({ name: user.name, mmr: user.mmr, look, rank: rankOf(user.mmr, user.name) });
+    m.p.push(null);
+  } else {
+    ffaWorld.users[slot] = user;
+    ffaWorld.inp[slot] = {};
+    ffaWorld.meta[slot] = { name: user.name, mmr: user.mmr, look, rank: rankOf(user.mmr, user.name) };
+  }
+
+  const newP = {
+    i: slot, x: rx, y: ry, fa: Math.random() * 6.283, ch: 3, rc: 0, st: 0, sw: -1, hs: [],
+    pa: -1, bc: 0, sc: 0, bw: 0, bdx: 0, bdy: 0, dead: false, ix: 0, iy: 0, spd: 200,
+    team: slot, extract: 0, points: 0, kills: 0, parries: 0, blinks: 0,
+    god: false, noCd: false, isMinion: false, ownerIdx: -1, at: 0, ax: 0, ay: 0
+  };
+  m.p[slot] = newP;
+
+  user.s.join(ffaWorld.id);
+  user.s.data.room = ffaWorld;
+  user.s.data.idx = slot;
+
+  broadcastFFAMeta();
+  console.log(`[FFA Drop-in] ${user.name} joined slot ${slot} (${G.FFA_W}x${G.FFA_H})`);
+}
+
+function broadcastFFAMeta() {
+  const meta = ffaWorld.meta.map(m => m || { name: 'Fighter', look: 'none', rank: 'Bronze' });
+  io.to(ffaWorld.id).emit('ffa_meta', {
+    names: meta.map(m => m.name),
+    looks: meta.map(m => m.look),
+    ranks: meta.map(m => m.rank),
+    boundW: G.FFA_W,
+    boundH: G.FFA_H
   });
-  console.log(`[FFA ${id}] extraction arena started with ${names.length} fighters`);
+}
+
+function leaveFFA(user, extracted, points) {
+  const idx = user.s.data.idx;
+  if (user.s.data.room !== ffaWorld || idx === undefined) return;
+  user.s.leave(ffaWorld.id);
+  user.s.data.room = null;
+  user.s.data.idx = undefined;
+
+  if (ffaWorld.m.p[idx]) ffaWorld.m.p[idx].dead = true;
+  ffaWorld.users[idx] = null;
+  ffaWorld.meta[idx] = null;
+
+  broadcastFFAMeta();
 }
 
 async function finish(room, winner, forfeit, quit) {
@@ -111,31 +157,14 @@ async function finish(room, winner, forfeit, quit) {
   room.done = true;
   rooms.delete(room.id);
 
-  if (room.ffa) {
-    room.users.forEach(async (u, i) => {
-      const p = room.m.p[i];
-      const banked = p && !p.rip && p.extract >= G.EXTRACT_TIME;
-      const pts = (banked && p) ? (p.points || 0) : 0;
-      let res = null;
-      if (pts > 0) res = await store.bankExtracted(u.key, pts);
-      const prof = await store.profile(u.key);
-      u.s.leave(room.id);
-      u.s.data.room = null;
-      u.s.emit('end', {
-        mode: 'ffa', you: i, winner: winner, extracted: banked, points: pts,
-        delta: res ? res.delta : 0, oldRank: res ? res.oldRank : prof.rank, profile: prof
-      });
-    });
-    return;
-  }
-
   if (room.unranked) {
-    room.users.forEach(async (u, i) => {
+    room.users.forEach(async (u) => {
+      if (!u) return;
       u.s.leave(room.id);
       u.s.data.room = null;
       const prof = await store.profile(u.key);
       u.s.emit('end', {
-        unranked: true, mode: room.mode, winner, you: i, forfeit: !!forfeit, quit,
+        unranked: true, mode: room.mode, winner, you: u.s.data.idx, forfeit: !!forfeit, quit,
         delta: 0, oldRank: prof.rank, score: room.m.score, profile: prof
       });
     });
@@ -148,6 +177,7 @@ async function finish(room, winner, forfeit, quit) {
   await store.flush();
 
   room.users.forEach(async (u, i) => {
+    if (!u) return;
     const r = i === winner ? res.win : res.lose;
     u.s.leave(room.id);
     u.s.data.room = null;
@@ -165,9 +195,10 @@ setInterval(() => {
   const now = Date.now();
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
+
   for (const room of rooms.values()) {
     const ev = G.tick(room.m, room.inp, dt);
-    room.inp.forEach((u) => { u.sw = u.pa = u.bl = false; });
+    room.inp.forEach((u) => { if (u) { u.sw = u.pa = u.bl = false; } });
     io.to(room.id).emit('s', { m: room.m, ev });
 
     (ev || []).forEach(async (e) => {
@@ -176,24 +207,34 @@ setInterval(() => {
         if (u) {
           const res = await store.bankExtracted(u.key, e.points);
           const prof = await store.profile(u.key);
-          u.s.leave(room.id);
-          u.s.data.room = null;
+          leaveFFA(u, true, e.points);
           u.s.emit('end', {
             mode: 'ffa', you: e.i, extracted: true, points: e.points,
             delta: res ? res.delta : 0, oldRank: res ? res.oldRank : prof.rank, profile: prof
           });
         }
+      } else if (e.t === 'kill' && room.ffa) {
+        const victim = room.users[e.i];
+        if (victim) {
+          const prof = await store.profile(victim.key);
+          leaveFFA(victim, false, 0);
+          victim.s.emit('end', {
+            mode: 'ffa', you: e.i, extracted: false, points: 0,
+            delta: 0, oldRank: prof.rank, profile: prof
+          });
+        }
       }
     });
 
-    if (room.m.phase === 'over') {
+    if (room.m.phase === 'over' && !room.ffa) {
       finish(room, room.m.winner, false);
     }
   }
 }, 1000 / 60);
 
 setInterval(() => {
-  io.emit('stats', { online: io.engine.clientsCount, queue: queue.length, ffa: ffaQueue.length });
+  const ffaCount = ffaWorld.users.filter(Boolean).length;
+  io.emit('stats', { online: io.engine.clientsCount, queue: queue.length, ffa: ffaCount });
 }, 5000);
 
 const num = (v, lo, hi) => { v = +v; return Number.isFinite(v) ? Math.max(lo, Math.min(hi, v)) : 0; };
@@ -221,7 +262,6 @@ function enter(s, r) {
     if (other !== s && other.data.key === r.key) { other.emit('kicked'); other.disconnect(true); }
   }
   queue = queue.filter((q) => q.s !== s);
-  ffaQueue = ffaQueue.filter((q) => q.s !== s);
   s.data.key = r.key; s.data.sh = r.sh;
 }
 
@@ -279,10 +319,10 @@ io.on('connection', (s) => {
 
   s.on('logout', (cb) => {
     const done = typeof cb === 'function' ? cb : () => {};
-    if (s.data.room) return done({ err: 'Finish your match first' });
+    if (s.data.room && s.data.room !== ffaWorld) return done({ err: 'Finish your match first' });
+    if (s.data.room === ffaWorld) leaveFFA({ s }, false, 0);
     if (s.data.sh) store.logout(s.data.sh);
     queue = queue.filter((q) => q.s !== s);
-    ffaQueue = ffaQueue.filter((q) => q.s !== s);
     leaveParty(s);
     s.data.key = s.data.sh = undefined;
     done({ ok: true });
@@ -315,15 +355,14 @@ io.on('connection', (s) => {
 
   s.on('unqueue', () => { queue = queue.filter((q) => q.s !== s); });
 
-  s.on('queueFFA', async () => {
-    if (s.data.room || ffaQueue.some((q) => q.s === s)) return;
-    if (!authed(s)) { s.emit('unauth'); return; }
+  // Direct drop-in to persistent Slither-style FFA
+  s.on('joinFFA', async (cb) => handle(cb, async () => {
+    if (s.data.room) return cb({ err: 'Already in a match' });
+    if (!authed(s)) { s.emit('unauth'); return cb({ err: 'Please log in first' }); }
     const p = await store.profile(s.data.key);
-    ffaQueue.push({ s, key: s.data.key, name: p.name, mmr: p.mmr, since: Date.now() });
-    tryMatch();
-  });
-
-  s.on('unqueueFFA', () => { ffaQueue = ffaQueue.filter((q) => q.s !== s); });
+    await joinFFA({ s, key: s.data.key, name: p.name, mmr: p.mmr });
+    cb({ ok: true, idx: s.data.idx, boundW: G.FFA_W, boundH: G.FFA_H });
+  }));
 
   // ---------- Private Parties ----------
   function broadcastParty(party) {
@@ -449,7 +488,7 @@ io.on('connection', (s) => {
     if (!room || !isOwnerSocket(s)) return;
     const myIdx = s.data.idx;
     room.m.p.forEach((p, idx) => {
-      if (idx !== myIdx && !p.dead && !p.isMinion) {
+      if (idx !== myIdx && p && !p.dead && !p.isMinion) {
         p.dead = true;
       }
     });
@@ -484,7 +523,7 @@ io.on('connection', (s) => {
     if (minion) {
       room.inp.push({});
       io.to(room.id).emit('s', { m: room.m, ev: ev });
-      if (typeof cb === 'function') cb({ ok: true, count: room.m.p.filter(x => x.isMinion && x.ownerIdx === myIdx && !x.dead).length });
+      if (typeof cb === 'function') cb({ ok: true, count: room.m.p.filter(x => x && x.isMinion && x.ownerIdx === myIdx && !x.dead).length });
     }
   });
 
@@ -508,6 +547,11 @@ io.on('connection', (s) => {
 
   s.on('forfeit', () => {
     const room = s.data.room;
+    if (room === ffaWorld) {
+      leaveFFA({ s }, false, 0);
+      s.emit('end', { mode: 'ffa', extracted: false, points: 0, delta: 0 });
+      return;
+    }
     if (room) finish(room, 1 - s.data.idx, true, s.data.idx);
   });
 
@@ -516,10 +560,12 @@ io.on('connection', (s) => {
 
   s.on('disconnect', () => {
     queue = queue.filter((q) => q.s !== s);
-    ffaQueue = ffaQueue.filter((q) => q.s !== s);
     leaveParty(s);
-    const room = s.data.room;
-    if (room) finish(room, 1 - s.data.idx, true, s.data.idx);
+    if (s.data.room === ffaWorld) {
+      leaveFFA({ s }, false, 0);
+    } else if (s.data.room) {
+      finish(s.data.room, 1 - s.data.idx, true, s.data.idx);
+    }
   });
 });
 

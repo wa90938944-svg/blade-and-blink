@@ -242,6 +242,7 @@ function createStore(uri) {
     return { win: { delta: WIN_MMR, oldRank: wr }, lose: { delta: LOSS_MMR, oldRank: lr } };
   }
 
+  // Balanced: 25 Essence = 1 MMR (Keeps Diamond prestige high)
   async function bankExtracted(key, points) {
     if (!points || points <= 0) return null;
     await waitForDb();
@@ -249,7 +250,9 @@ function createStore(uri) {
     if (!user) return null;
     const oldMmr = user.mmr;
     const oldRank = rankOf(oldMmr, user.name);
-    const delta = Math.floor(points / 10);
+    const delta = Math.floor(points / 25);
+    if (delta <= 0) return { delta: 0, oldRank: oldRank, newMmr: oldMmr };
+
     const newMmr = oldMmr + delta;
     const newPeak = Math.max(user.peak || START_MMR, newMmr);
     const earned = unlocksFor(newPeak, user.name);
@@ -278,7 +281,6 @@ function createStore(uri) {
     }));
   }
 
-  // ---------- Admin Operations ----------
   async function adminGetUsers() {
     await waitForDb();
     const list = await users.find({}).sort({ created: -1 }).toArray();

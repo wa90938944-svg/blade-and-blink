@@ -2,8 +2,9 @@
 // browser (local bot / 2-player / endless modes), so every mode plays identically.
 (function (root) {
   var W = 640, H = 400, R = 13, PAR = 0.32, A0 = 0.08, A1 = 0.22;
+  var FFA_W = 1800, FFA_H = 1200;
   var REACH = 56, BLINK_D = 120, BLINK_REC = 0.3, CHARGE_T = 3.5, SPAWN_T = 5, SWING_CD = 0.2, BLINK_WIND = 0.1;
-  var SHRINE_R = 34, EXTRACT_TIME = 3.0;
+  var SHRINE_R = 36, EXTRACT_TIME = 3.0;
 
   function mk(i, x, fa, y, team) {
     return {
@@ -37,7 +38,7 @@
   }
 
   function create(win, mode) {
-    var m = { win: win, score: [0, 0], round: 1, mode: mode || '1v1' };
+    var m = { win: win, score: [0, 0], round: 1, mode: mode || '1v1', boundW: W, boundH: H };
     reset(m);
     return m;
   }
@@ -47,37 +48,28 @@
   }
 
   function createEndless() {
-    var m = { endless: true, win: 999, score: [0, 0], round: 1, kills: 0, time: 0, sp: 0, spawned: 0 };
+    var m = { endless: true, win: 999, score: [0, 0], round: 1, kills: 0, time: 0, sp: 0, spawned: 0, boundW: W, boundH: H };
     m.p = [mk(0, W / 2, 0)];
     m.phase = 'ready'; m.t = 1.3; m.winner = -1;
     return m;
   }
 
-  function createFFA(players) {
-    var m = {
-      ffa: true, mode: 'ffa', p: [], shrines: [
-        { id: 0, x: W / 4, y: H / 4, r: SHRINE_R },
-        { id: 1, x: (3 * W) / 4, y: H / 4, r: SHRINE_R },
-        { id: 2, x: W / 4, y: (3 * H) / 4, r: SHRINE_R },
-        { id: 3, x: (3 * W) / 4, y: (3 * H) / 4, r: SHRINE_R }
-      ], phase: 'fight', round: 1, score: [0, 0], win: 1
+  function createFFA() {
+    return {
+      ffa: true, mode: 'ffa', p: [], shrines: [],
+      phase: 'fight', round: 1, score: [0, 0], win: 9999,
+      boundW: FFA_W, boundH: FFA_H, shrineTimer: 10
     };
-    (players || []).forEach(function (pl, i) {
-      var a = (i * 6.283) / Math.max(1, players.length);
-      var rx = W / 2 + Math.cos(a) * (W * 0.35);
-      var ry = H / 2 + Math.sin(a) * (H * 0.35);
-      m.p.push(mk(i, cl(rx, R + 10, W - R - 10), Math.atan2(H / 2 - ry, W / 2 - rx), cl(ry, R + 10, H - R - 10), i));
-    });
-    return m;
   }
 
   function spawnBodyguard(m, ownerIdx, ev) {
     var owner = m.p[ownerIdx];
     if (!owner) return null;
+    var bW = m.boundW || W, bH = m.boundH || H;
     var idx = m.p.length;
     var a = Math.random() * 6.283;
-    var x = cl(owner.x + Math.cos(a) * 40, R + 5, W - R - 5);
-    var y = cl(owner.y + Math.sin(a) * 40, R + 5, H - R - 5);
+    var x = cl(owner.x + Math.cos(a) * 40, R + 5, bW - R - 5);
+    var y = cl(owner.y + Math.sin(a) * 40, R + 5, bH - R - 5);
     var bg = mk(idx, x, owner.fa, y, owner.team);
     bg.isMinion = true;
     bg.ownerIdx = ownerIdx;
@@ -101,20 +93,20 @@
     }
     if (m.ffa) {
       return m.p.filter(function (q) {
-        if (q.i === i || q.dead) return false;
+        if (!q || q.i === i || q.dead) return false;
         if (q.isMinion && q.ownerIdx === i) return false;
         return true;
       });
     }
     if (m.mode === '2v2') {
       return m.p.filter(function (q) {
-        if (q.dead) return false;
+        if (!q || q.dead) return false;
         if (q.isMinion && q.ownerIdx === i) return false;
         return q.team !== self.team;
       });
     }
     return m.p.filter(function (q) {
-      if (q.dead) return false;
+      if (!q || q.dead) return false;
       if (q.isMinion && q.ownerIdx === i) return false;
       return q.i !== i;
     });
@@ -128,20 +120,20 @@
     if (parrying(d)) {
       if (blink) {
         if (!a.god) a.dead = true;
-        d.points = (d.points || 0) + 50;
+        d.points = (d.points || 0) + 25;
         d.blinks = (d.blinks || 0) + 1;
         ev.push({ t: 'intercept', by: d.i, victim: a.i, x: d.x, y: d.y });
       } else {
         if (!a.god) {
           a.st = 1.1; a.sw = -1; a.bw = 0;
         }
-        d.points = (d.points || 0) + 30;
+        d.points = (d.points || 0) + 15;
         d.parries = (d.parries || 0) + 1;
       }
       ev.push({ t: 'parry', x: d.x, y: d.y, b: !!blink, by: d.i });
     } else {
       d.dead = true;
-      a.points = (a.points || 0) + 100;
+      a.points = (a.points || 0) + 35;
       a.kills = (a.kills || 0) + 1;
       ev.push({ t: 'slain', killer: a.i, victim: d.i });
     }
@@ -173,7 +165,8 @@
   function dash(m, i, ev) {
     var p = m.p[i];
     if (!p) return;
-    var nx = cl(p.x + p.bdx * BLINK_D, R, W - R), ny = cl(p.y + p.bdy * BLINK_D, R, H - R);
+    var bW = m.boundW || W, bH = m.boundH || H;
+    var nx = cl(p.x + p.bdx * BLINK_D, R, bW - R), ny = cl(p.y + p.bdy * BLINK_D, R, bH - R);
     ev.push({ t: 'blink', i: i, x1: p.x, y1: p.y, x2: nx, y2: ny });
     var fs = foes(m, i);
     for (var j = 0; j < fs.length && !p.dead; j++) {
@@ -235,10 +228,11 @@
 
   function spawnBot(m, ev) {
     var a = m.p[0], x, y, k = 0;
+    var bW = m.boundW || W, bH = m.boundH || H;
     do {
       var s = Math.floor(Math.random() * 4);
-      x = s === 0 ? R : s === 1 ? W - R : R + Math.random() * (W - 2 * R);
-      y = s === 2 ? R : s === 3 ? H - R : R + Math.random() * (H - 2 * R);
+      x = s === 0 ? R : s === 1 ? bW - R : R + Math.random() * (bW - 2 * R);
+      y = s === 2 ? R : s === 3 ? bH - R : R + Math.random() * (bH - 2 * R);
     } while (a && Math.hypot(x - a.x, y - a.y) < 220 && ++k < 12);
     var b = mk(m.p.length, x, a ? Math.atan2(a.y - y, a.x - x) : 0, y);
     b.ch = 0; b.st = 0.7; b.at = 0; b.ax = 0; b.ay = 0;
@@ -251,15 +245,40 @@
     m.time += dt; m.sp -= dt;
     if (m.sp <= 0) { spawnBot(m, ev); m.sp = SPAWN_T; }
     for (var j = 1; j < m.p.length; j++) {
-      if (!m.p[j].dead) {
+      if (m.p[j] && !m.p[j].dead) {
         if (m.p[j].isMinion) inp[j] = bodyguardAI(m, m.p[j], dt);
         else inp[j] = botAI(m, m.p[j], dt);
       }
     }
   }
 
+  function updateShrines(m, dt, ev) {
+    m.shrines = m.shrines || [];
+    for (var i = m.shrines.length - 1; i >= 0; i--) {
+      m.shrines[i].life -= dt;
+      if (m.shrines[i].life <= 0) {
+        ev.push({ t: 'shrine_expired', x: m.shrines[i].x, y: m.shrines[i].y });
+        m.shrines.splice(i, 1);
+      }
+    }
+    m.shrineTimer = (m.shrineTimer || 0) - dt;
+    // Lowered shrine spawn frequency: Max 2 shrines active on the 1800x1200 map
+    if (m.shrineTimer <= 0) {
+      if (m.shrines.length < 2) {
+        var sx = 120 + Math.random() * (m.boundW - 240);
+        var sy = 120 + Math.random() * (m.boundH - 240);
+        m.shrines.push({ id: Math.random(), x: sx, y: sy, r: SHRINE_R, life: 40 });
+        ev.push({ t: 'shrine_spawn', x: sx, y: sy });
+      }
+      m.shrineTimer = 25; // 25s delay between spawn attempts
+    }
+  }
+
   function simulate(m, inp, dt, ev) {
     var n = m.p.length, i, j, p, o, q, u, l, fs;
+    var bW = m.boundW || W, bH = m.boundH || H;
+
+    if (m.ffa) updateShrines(m, dt, ev);
 
     for (i = 0; i < n; i++) {
       p = m.p[i];
@@ -302,8 +321,8 @@
       }
       if (l > 0) {
         var sp = p.spd * (p.sw >= 0 ? 0.6 : 1) * (parrying(p) ? 0.5 : 1) * (p.bw > 0 ? 0.3 : 1);
-        p.x = cl(p.x + p.ix * sp * dt, R, W - R);
-        p.y = cl(p.y + p.iy * sp * dt, R, H - R);
+        p.x = cl(p.x + p.ix * sp * dt, R, bW - R);
+        p.y = cl(p.y + p.iy * sp * dt, R, bH - R);
         p.extract = 0;
       } else if (m.ffa && m.shrines && p.sw < 0 && p.pa < 0 && p.bw <= 0 && !p.isMinion) {
         var near = false;
@@ -331,8 +350,8 @@
         var sx = q.x - p.x, sy = q.y - p.y, sd = Math.hypot(sx, sy);
         if (sd > 0 && sd < R * 2) {
           var ps = (R * 2 - sd) / 2; sx /= sd; sy /= sd;
-          p.x = cl(p.x - sx * ps, R, W - R); p.y = cl(p.y - sy * ps, R, H - R);
-          q.x = cl(q.x + sx * ps, R, W - R); q.y = cl(q.y + sy * ps, R, H - R);
+          p.x = cl(p.x - sx * ps, R, bW - R); p.y = cl(p.y - sy * ps, R, bH - R);
+          q.x = cl(q.x + sx * ps, R, bW - R); q.y = cl(q.y + sy * ps, R, bH - R);
         }
       }
     }
@@ -353,40 +372,35 @@
 
     if (m.endless) {
       m.p.forEach(function (c) {
-        if (c.dead && !c.rip) {
+        if (c && c.dead && !c.rip) {
           c.rip = true;
           ev.push({ t: 'kill', i: c.i, x: c.x, y: c.y });
           if (c.i > 0 && !c.isMinion) m.kills++;
         }
       });
-      if (m.p[0].dead) { m.phase = 'roundend'; m.t = 1.2; }
+      if (m.p[0] && m.p[0].dead) { m.phase = 'roundend'; m.t = 1.2; }
       return;
     }
 
     if (m.ffa) {
       m.p.forEach(function (c) {
-        if (c.dead && !c.rip) {
+        if (c && c.dead && !c.rip) {
           c.rip = true;
           ev.push({ t: 'kill', i: c.i, x: c.x, y: c.y });
         }
       });
-      var alive = m.p.filter(function (q) { return !q.dead && !q.isMinion; });
-      if (alive.length <= 1) {
-        m.phase = 'roundend'; m.t = 2.0;
-        m.winner = alive.length === 1 ? alive[0].i : -1;
-      }
       return;
     }
 
     if (m.mode === '2v2') {
       m.p.forEach(function (c) {
-        if (c.dead && !c.rip) {
+        if (c && c.dead && !c.rip) {
           c.rip = true;
           ev.push({ t: 'kill', i: c.i, x: c.x, y: c.y });
         }
       });
-      var t0Alive = m.p.some(function (c) { return c.team === 0 && !c.dead && !c.isMinion; });
-      var t1Alive = m.p.some(function (c) { return c.team === 1 && !c.dead && !c.isMinion; });
+      var t0Alive = m.p.some(function (c) { return c && c.team === 0 && !c.dead && !c.isMinion; });
+      var t1Alive = m.p.some(function (c) { return c && c.team === 1 && !c.dead && !c.isMinion; });
       if (!t0Alive || !t1Alive) {
         m.phase = 'roundend'; m.t = 1.7;
         if (t0Alive && !t1Alive) m.score[0]++;
@@ -395,11 +409,11 @@
       return;
     }
 
-    var d0 = m.p[0].dead, d1 = m.p[1].dead;
+    var d0 = m.p[0] && m.p[0].dead, d1 = m.p[1] && m.p[1].dead;
     if (d0 || d1) {
       m.phase = 'roundend'; m.t = 1.7;
       if (!(d0 && d1)) m.score[d0 ? 1 : 0]++;
-      m.p.forEach(function (c) { if (c.dead && !c.rip) { c.rip = true; ev.push({ t: 'kill', i: c.i, x: c.x, y: c.y }); } });
+      m.p.forEach(function (c) { if (c && c.dead && !c.rip) { c.rip = true; ev.push({ t: 'kill', i: c.i, x: c.x, y: c.y }); } });
     }
   }
 
@@ -412,7 +426,7 @@
     } else if (m.phase === 'roundend') {
       m.t -= dt;
       if (m.t <= 0) {
-        if (m.endless || m.ffa) { m.phase = 'over'; }
+        if (m.endless) { m.phase = 'over'; }
         else if (Math.max(m.score[0], m.score[1]) >= m.win) { m.phase = 'over'; m.winner = m.score[0] > m.score[1] ? 0 : 1; }
         else { m.round++; reset(m); }
       }
@@ -421,7 +435,7 @@
   }
 
   var api = {
-    W: W, H: H, R: R, PAR: PAR, A0: A0, A1: A1, REACH: REACH, CHARGE_T: CHARGE_T,
+    W: W, H: H, FFA_W: FFA_W, FFA_H: FFA_H, R: R, PAR: PAR, A0: A0, A1: A1, REACH: REACH, CHARGE_T: CHARGE_T,
     SWING_CD: SWING_CD, BLINK_D: BLINK_D, BLINK_WIND: BLINK_WIND, SHRINE_R: SHRINE_R, EXTRACT_TIME: EXTRACT_TIME,
     create: create, create2v2: create2v2, createEndless: createEndless, createFFA: createFFA, spawnBodyguard: spawnBodyguard, tick: tick
   };

@@ -34,6 +34,8 @@
   var teams = [0, 1];
   var godActive = false, noCdActive = false;
 
+  var cam = { x: W / 2, y: H / 2 };
+
   function hexA(h, a) { return 'rgba(' + parseInt(h.slice(1, 3), 16) + ',' + parseInt(h.slice(3, 5), 16) + ',' + parseInt(h.slice(5, 7), 16) + ',' + a + ')'; }
   function strokePath(g, pts, px, py, col, w) {
     g.beginPath();
@@ -269,15 +271,15 @@
     if (!M) return;
     if (M.endless) {
       $('s0').textContent = 'Kills ' + M.kills;
-      $('s1').textContent = 'Bots ' + M.p.filter(function (q) { return q.i > 0 && !q.dead; }).length;
+      $('s1').textContent = 'Bots ' + M.p.filter(function (q) { return q && q.i > 0 && !q.dead; }).length;
       $('rnd').textContent = 'Endless ' + Math.floor(M.time) + 's';
       return;
     }
     if (M.ffa) {
       var selfP = M.p[me] || {};
       $('s0').textContent = 'Essence ' + (selfP.points || 0);
-      $('s1').textContent = 'Alive ' + M.p.filter(function (q) { return !q.dead && !q.isMinion; }).length;
-      $('rnd').textContent = 'Shrine Extraction';
+      $('s1').textContent = 'Fighters ' + M.p.filter(function (q) { return q && !q.dead && !q.isMinion; }).length;
+      $('rnd').textContent = 'Shrine Extraction (Live Arena)';
       return;
     }
     if (M.mode === '2v2') {
@@ -379,11 +381,11 @@
   $('rank').onclick = enterQueue;
   $('bot').onclick = function () { startLocal('bot'); };
   $('endless').onclick = function () { startLocal('endless'); };
-  $('cancel').onclick = function () { sock.emit('unqueue'); sock.emit('unqueueFFA'); clearInterval(qI); showLobby(); };
+  $('cancel').onclick = function () { sock.emit('unqueue'); clearInterval(qI); showLobby(); };
   $('tolobby').onclick = showLobby;
   $('again').onclick = function () {
     if (lastKind === 'online') enterQueue();
-    else if (lastKind === 'ffa') enterFFAQueue();
+    else if (lastKind === 'ffa') joinFFAInstant();
     else startLocal(lastKind);
   };
   $('boardbtn').onclick = function () {
@@ -399,9 +401,21 @@
       if (r && r.err) toast(r.err, true);
     });
   };
-  $('coopextractbtn').onclick = enterFFAQueue;
+  $('coopextractbtn').onclick = joinFFAInstant;
   $('cooppartybtn').onclick = function () { show('partymenu'); };
   $('cooplocalbtn').onclick = function () { startLocal('local'); };
+
+  // ---------- Slither.io Drop-In FFA ----------
+  function joinFFAInstant() {
+    lastKind = 'ffa';
+    sock.emit('joinFFA', function (r) {
+      if (r && r.err) return toast(r.err, true);
+      mode = 'ffa'; me = r.idx; M = null;
+      looks = []; names = []; teams = []; disp = [];
+      beginView();
+      $('rnd').textContent = 'Shrine Extraction (Live Arena)';
+    });
+  }
 
   // ---------- Private Parties UI ----------
   $('partyback').onclick = function () { show('coopmenu'); };
@@ -591,18 +605,6 @@
     }, 1000);
   }
 
-  function enterFFAQueue() {
-    lastKind = 'ffa'; qT = 0;
-    $('qt').textContent = '0:00';
-    show('queue');
-    sock.emit('queueFFA');
-    clearInterval(qI);
-    qI = setInterval(function () {
-      qT++;
-      $('qt').textContent = Math.floor(qT / 60) + ':' + ('0' + (qT % 60)).slice(-2);
-    }, 1000);
-  }
-
   $('forfeit').onclick = function () {
     if (!mode) return;
     var b = $('forfeit');
@@ -625,6 +627,7 @@
   function beginView() {
     fx = []; snap = true; lastPhase = ''; lastScore = [0, 0]; msgT = 0; bot.x = bot.y = 0;
     shake = punch = flash = freeze = 0;
+    cam.x = W / 2; cam.y = H / 2;
     inkX.clearRect(0, 0, W, H);
     show(null); hud();
   }
@@ -652,23 +655,28 @@
     sock.on('connect', function () { resume(0); });
     sock.on('match', function (d) {
       clearInterval(qI);
-      mode = d.mode === 'ffa' ? 'ffa' : 'online';
+      mode = d.mode === '2v2' ? '2v2' : 'online';
       lastKind = mode; me = d.you; names = d.names; M = null;
       vs = { ranks: d.ranks, mmrs: d.mmrs };
       looks = d.looks || [];
       teams = d.teams || [0, 1];
       disp = [];
       beginView();
-      $('rnd').textContent = d.mode === 'ffa' ? 'Shrine Extraction' : d.mode === '2v2' ? '2v2 Duel' : 'Ranked';
+      $('rnd').textContent = d.mode === '2v2' ? '2v2 Duel' : 'Ranked';
+    });
+    sock.on('ffa_meta', function (d) {
+      if (mode !== 'ffa') return;
+      names = d.names;
+      looks = d.looks;
+      teams = d.names.map(function (_, i) { return i; });
     });
     sock.on('s', function (d) {
-      if (mode !== 'online' && mode !== 'ffa') return;
+      if (mode !== 'online' && mode !== 'ffa' && mode !== '2v2') return;
       M = d.m; onEv(d.ev);
     });
     sock.on('end', function (d) {
       mode = null;
-      var oldRank = prof && prof.rank;
-      setProfile(d.profile);
+      if (d.profile) setProfile(d.profile);
       if (d.mode === 'ffa') {
         if (d.extracted) {
           result('Extracted!', 'Secured ' + d.points + ' Ink Essence.', 'Banked to rank: ' + (d.delta > 0 ? '+' : '') + d.delta + ' MMR', (d.delta > 0 ? '+' : '') + d.delta + ' MMR', 'win');
@@ -679,7 +687,7 @@
       }
       var won = d.winner === (d.mode === '2v2' ? teams[me] : d.you);
       var why = d.forfeit ? (d.quit === d.you ? 'You forfeited. ' : 'Opponent forfeited. ') : '';
-      var line = d.profile.rank + ', ' + d.profile.mmr + ' MMR';
+      var line = (d.profile ? d.profile.rank + ', ' + d.profile.mmr + ' MMR' : '');
       if (d.unranked) line = 'Unranked Private Match';
       result(won ? 'Victory' : 'Defeat', why + (d.score ? names[0] + ' ' + d.score[0] + ' - ' + d.score[1] + ' ' + names[1] : ''),
         line, d.delta ? (d.delta > 0 ? '+' : '') + d.delta + ' MMR' : '', won ? 'win' : 'lose');
@@ -687,7 +695,7 @@
     sock.on('kicked', function () { toLogin('You have been disconnected.'); });
     sock.on('unauth', function () { setToken(''); toLogin('Your session ended, please log in again.'); });
     sock.on('disconnect', function () {
-      if (mode === 'online' || mode === 'ffa') { mode = null; result('Disconnected', 'Lost connection to server.', '', '', 'lose'); }
+      if (mode) { mode = null; result('Disconnected', 'Lost connection to server.', '', '', 'lose'); }
     });
     sock.on('stats', function (d) {
       document.querySelectorAll('.stats').forEach(function (e) {
@@ -777,7 +785,7 @@
     }
   }
   function ring(x, y, c, r1, t, w) { fx.push({ k: 'r', x: x, y: y, t: t, T: t, r0: R, r1: r1, c: c, w: w }); }
-  function hitStop(t) { if (mode !== 'online' && mode !== 'ffa') freeze = t; }
+  function hitStop(t) { if (mode !== 'online' && mode !== 'ffa' && mode !== '2v2') freeze = t; }
 
   function onEv(ev) {
     (ev || []).forEach(function (e) {
@@ -785,6 +793,10 @@
       if (e.t === 'swing') snd('swing', e.x);
       else if (e.t === 'raise') snd('raise', e.x);
       else if (e.t === 'shine') snd('shine', e.x);
+      else if (e.t === 'shrine_spawn') {
+        ring(e.x, e.y, GOLD, R + 60, 0.7, 4);
+        burst(e.x, e.y, GOLD, 18);
+      }
       else if (e.t === 'spawn_minion') {
         ring(e.x, e.y, GOLD, R + 45, 0.4, 4);
         burst(e.x, e.y, GOLD, 16);
@@ -807,10 +819,10 @@
       } else if (e.t === 'god_block') {
         burst(e.x, e.y, '#ffffff', 14); ring(e.x, e.y, GOLD, R + 30, 0.3, 4);
       } else if (e.t === 'intercept') {
-        say('Blink Intercepted! +50', 0.9);
+        say('Blink Intercepted! +25', 0.9);
       } else if (e.t === 'extract') {
         say('Player Extracted!', 1.2);
-        ring(W / 2, H / 2, GOLD, R + 90, 0.8, 6);
+        ring(e.x || W / 2, e.y || H / 2, GOLD, R + 90, 0.8, 6);
       } else if (e.t === 'kill') {
         c = COL[teams[e.i] || 0];
         small = !!(M && M.endless && e.i > 0);
@@ -834,8 +846,6 @@
     else if (M.phase === 'roundend') {
       if (M.mode === '2v2') {
         say('Round Concluded', 1.7);
-      } else if (M.ffa) {
-        say('Extraction Closed', 1.7);
       } else {
         var w = M.score[0] > lastScore[0] ? 0 : M.score[1] > lastScore[1] ? 1 : -1;
         say(M.endless ? 'Overrun!' : w < 0 ? 'Double KO' : names[w] + ' scores', 1.7);
@@ -863,7 +873,7 @@
     if (mode && (k.indexOf('Arrow') === 0 || k === ' ' || k === '/' || k === ',' || k === '.')) e.preventDefault();
     keys[k] = true;
     if (!mode || e.repeat) return;
-    if (mode === 'online' || mode === 'ffa') {
+    if (mode === 'online' || mode === 'ffa' || mode === '2v2') {
       if (k === ' ') sock.emit('act', 'bl');
       else if (k === 'e') sock.emit('act', 'pa');
       return;
@@ -884,18 +894,20 @@
     mouse.y = (e.clientY - r.top) * H / r.height;
   });
   cv.addEventListener('mousedown', function (e) {
-    if (mode !== 'online' && mode !== 'ffa') return;
+    if (mode !== 'online' && mode !== 'ffa' && mode !== '2v2') return;
     if (e.button === 0) sock.emit('act', 'sw');
     else if (e.button === 2) sock.emit('act', 'pa');
   });
 
   setInterval(function () {
-    if ((mode !== 'online' && mode !== 'ffa') || !M) return;
+    if ((mode !== 'online' && mode !== 'ffa' && mode !== '2v2') || !M) return;
     var d = disp[me] || (M.p[me] ? { x: M.p[me].x, y: M.p[me].y } : { x: W / 2, y: H / 2 });
+    var aimX = mode === 'ffa' ? mouse.x + (cam.x - W / 2) : mouse.x;
+    var aimY = mode === 'ffa' ? mouse.y + (cam.y - H / 2) : mouse.y;
     sock.emit('in', {
       x: sv.x || (((keys.d || keys.ArrowRight) ? 1 : 0) - ((keys.a || keys.ArrowLeft) ? 1 : 0)),
       y: sv.y || (((keys.s || keys.ArrowDown) ? 1 : 0) - ((keys.w || keys.ArrowUp) ? 1 : 0)),
-      aim: touch ? null : Math.atan2(mouse.y - d.y, mouse.x - d.x)
+      aim: touch ? null : Math.atan2(aimY - d.y, aimX - d.x)
     });
   }, 33);
 
@@ -946,7 +958,7 @@
   function press(k) {
     if (!mode) return;
     vib(10);
-    if (mode === 'online' || mode === 'ffa') sock.emit('act', k); else pend[0][k] = true;
+    if (mode === 'online' || mode === 'ffa' || mode === '2v2') sock.emit('act', k); else pend[0][k] = true;
   }
   [['tbSwing', 'sw'], ['tbParry', 'pa'], ['tbBlink', 'bl']].forEach(function (b) {
     var btn = $(b[0]);
@@ -954,7 +966,7 @@
     ['pointerup', 'pointercancel', 'pointerleave'].forEach(function (n) { btn.addEventListener(n, function () { btn.classList.remove('down'); }); });
   });
   function padState() {
-    var p = M && M.p[mode === 'online' || mode === 'ffa' ? me : 0];
+    var p = M && M.p[mode === 'online' || mode === 'ffa' || mode === '2v2' ? me : 0];
     if (!p || !mode) return;
     $('tbSwing').classList.toggle('cd', p.sc > 0 || p.sw >= 0 || p.bw > 0);
     $('tbParry').classList.toggle('cd', p.pa >= 0);
@@ -969,7 +981,7 @@
       var p = M.p[i]; if (!p) continue;
       if (!disp[i]) disp[i] = { x: p.x, y: p.y };
       var d = disp[i];
-      if (snap || (mode !== 'online' && mode !== 'ffa') || Math.hypot(p.x - d.x, p.y - d.y) > 60) {
+      if (snap || (mode !== 'online' && mode !== 'ffa' && mode !== '2v2') || Math.hypot(p.x - d.x, p.y - d.y) > 60) {
         d.x = p.x; d.y = p.y;
       } else {
         d.x += (p.x - d.x) * 0.5; d.y += (p.y - d.y) * 0.5;
@@ -991,7 +1003,7 @@
       else if (f.k === 'd') {
         var fr = Math.pow(0.03, dt);
         f.vx *= fr; f.vy *= fr; f.va *= fr; f.a += f.va * dt;
-        f.x = Math.max(8, Math.min(W - 8, f.x + f.vx * dt)); f.y = Math.max(8, Math.min(H - 8, f.y + f.vy * dt));
+        f.x = f.x + f.vx * dt; f.y = f.y + f.vy * dt;
         streak(f.px, f.py, f.x, f.y, f.c, 2); f.px = f.x; f.py = f.y;
         if (Math.hypot(f.vx, f.vy) < 24) f.t = 0;
       }
@@ -1020,12 +1032,24 @@
     ctx.save();
     ctx.fillStyle = PAPER; ctx.fillRect(0, 0, W, H);
     if (!M) {
-      if (mode === 'online' || mode === 'ffa') {
+      if (mode === 'online' || mode === 'ffa' || mode === '2v2') {
         ctx.fillStyle = '#5a4f40'; ctx.font = '600 20px "Barlow Condensed", sans-serif'; ctx.textAlign = 'center';
         ctx.fillText('Searching for match...', W / 2, H / 2);
       }
       ctx.restore(); return;
     }
+
+    var boundW = (M && M.boundW) || W;
+    var boundH = (M && M.boundH) || H;
+
+    // Camera follow for big FFA maps
+    if (mode === 'ffa') {
+      var selfPos = disp[me] || (M.p[me] ? { x: M.p[me].x, y: M.p[me].y } : { x: boundW / 2, y: boundH / 2 });
+      cam.x += (selfPos.x - cam.x) * 0.1;
+      cam.y += (selfPos.y - cam.y) * 0.1;
+      ctx.translate(W / 2 - cam.x, H / 2 - cam.y);
+    }
+
     if (punch > 0 && !calm) {
       ctx.translate(W / 2, H / 2); ctx.scale(1 + punch, 1 + punch); ctx.translate(-W / 2, -H / 2);
     }
@@ -1033,16 +1057,17 @@
 
     ctx.strokeStyle = 'rgba(60,40,20,.10)'; ctx.lineWidth = 1; ctx.beginPath();
     var x, y;
-    for (x = 40; x < W; x += 40) { ctx.moveTo(x, 0); ctx.lineTo(x, H); }
-    for (y = 40; y < H; y += 40) { ctx.moveTo(0, y); ctx.lineTo(W, y); }
+    for (x = 40; x < boundW; x += 40) { ctx.moveTo(x, 0); ctx.lineTo(x, boundH); }
+    for (y = 40; y < boundH; y += 40) { ctx.moveTo(0, y); ctx.lineTo(boundW, y); }
     ctx.stroke();
-    ctx.drawImage(inkC, 0, 0);
+
+    if (mode !== 'ffa') ctx.drawImage(inkC, 0, 0);
 
     if (M.shrines) drawShrines(ctx, M.shrines, now);
 
     ctx.strokeStyle = 'rgba(60,40,20,.22)'; ctx.lineWidth = 1; ctx.setLineDash([6, 8]);
-    ctx.beginPath(); ctx.moveTo(W / 2, 0); ctx.lineTo(W / 2, H); ctx.stroke(); ctx.setLineDash([]);
-    ctx.strokeStyle = INK; ctx.lineWidth = 8; ctx.strokeRect(4, 4, W - 8, H - 8);
+    ctx.beginPath(); ctx.moveTo(boundW / 2, 0); ctx.lineTo(boundW / 2, boundH); ctx.stroke(); ctx.setLineDash([]);
+    ctx.strokeStyle = INK; ctx.lineWidth = 8; ctx.strokeRect(4, 4, boundW - 8, boundH - 8);
 
     fx.forEach(function (f) {
       var a = f.T ? Math.max(0, f.t / f.T) : 1;
@@ -1081,7 +1106,7 @@
     });
 
     M.p.forEach(function (p, i) {
-      if (p.dead) return;
+      if (!p || p.dead) return;
       var px = disp[i] ? disp[i].x : p.x, py = disp[i] ? disp[i].y : p.y;
       var teamId = (M.mode === '2v2' && p.team !== undefined) ? p.team : (teams[i] !== undefined ? teams[i] : (i > 0 ? 1 : 0));
       var c = COL[teamId % COL.length];
@@ -1116,13 +1141,11 @@
         ctx.beginPath(); ctx.arc(px, py, R + 9 + (on ? p.pa * 20 : 0), 0, 7); ctx.stroke();
       }
 
-      // 2v2 Teammate indicator
       if (M.mode === '2v2' && i !== me && teams[i] === teams[me] && !p.isMinion) {
         ctx.strokeStyle = hexA(BONE, 0.65); ctx.lineWidth = 2; ctx.beginPath();
         ctx.arc(px, py, R + 6, 0, 6.283); ctx.stroke();
       }
 
-      // CPU Bodyguard Crest Badge
       if (p.isMinion) {
         ctx.strokeStyle = GOLD; ctx.lineWidth = 2; ctx.beginPath();
         ctx.arc(px, py, R + 5, 0, 6.283); ctx.stroke();
@@ -1130,14 +1153,12 @@
         ctx.fillText('GUARD', px, py - R - 8);
       }
 
-      // Extraction Channeling Meter
       if (p.extract > 0) {
         var ratio = Math.min(1, p.extract / S.EXTRACT_TIME);
         ctx.strokeStyle = GOLD; ctx.lineWidth = 3; ctx.beginPath();
         ctx.arc(px, py, R + 8, -1.57, -1.57 + ratio * 6.283); ctx.stroke();
       }
 
-      // God Mode Aura
       if (p.god) {
         ctx.strokeStyle = GOLD; ctx.lineWidth = 2;
         ctx.beginPath(); ctx.arc(px, py, R + 4 + Math.sin(now / 150) * 2, 0, 6.283); ctx.stroke();
@@ -1161,13 +1182,16 @@
         ctx.strokeStyle = GOLD; ctx.lineWidth = 2;
         for (var k = 0; k < 3; k++) { var a = now / 120 + k * 2.1; ctx.beginPath(); ctx.arc(px + Math.cos(a) * 15, py - R - 8 + Math.sin(a) * 4, 3, 0, 7); ctx.stroke(); }
       }
-      if ((mode === 'online' || mode === 'ffa') && i === me) {
+      if ((mode === 'online' || mode === 'ffa' || mode === '2v2') && i === me) {
         ctx.fillStyle = (prof && prof.isOwner) ? '#c9331f' : INK;
         ctx.font = '700 14px "Barlow Condensed", sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
         ctx.fillText((prof && prof.isOwner) ? '[OWNER] ' + prof.name : 'YOU', px, py - R - 18);
       }
     });
 
+    ctx.restore();
+
+    // UI overlays rendered in screen coordinates (fixed above the camera)
     var selfP = M.p[me || 0];
     if (selfP && !selfP.dead && (!M.endless || me === 0)) {
       var bx = 20;
@@ -1186,6 +1210,7 @@
 
     ctx.drawImage(vigC, 0, 0);
     ctx.globalAlpha = 0.6; ctx.drawImage(grainC, 0, 0); ctx.globalAlpha = 1;
+
     if (msgT > 0) {
       var age = msgD - msgT, sc = 1 + Math.max(0, 0.18 - age) * 2.2;
       ctx.save(); ctx.translate(W / 2, H / 2 - 60); ctx.scale(sc, sc);
@@ -1195,7 +1220,6 @@
       ctx.fillStyle = INK; ctx.fillText(msg, 0, 0);
       ctx.restore();
     }
-    ctx.restore();
     if (flash > 0 && !calm) { ctx.globalAlpha = Math.min(1, flash); ctx.fillStyle = INK; ctx.fillRect(0, 0, W, H); ctx.globalAlpha = 1; }
   }
 
@@ -1236,7 +1260,7 @@
       }
     }
     watch(); smooth();
-    if (M && mode === 'endless') hud();
+    if (M && (mode === 'endless' || mode === 'ffa')) hud();
     if (touch) padState();
     fxStep(M && M.phase === 'roundend' ? dt * 0.4 : dt);
     draw(now);
