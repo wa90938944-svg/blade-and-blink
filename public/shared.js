@@ -49,6 +49,10 @@
       ];
     } else {
       var p0 = mk(0, 90, 0, H / 2, 0, 'player');
+      if (m.botTier === 'apex') {
+        p0.lives = 5;
+        p0.maxLives = 5;
+      }
       var p1 = mk(1, W - 90, Math.PI, H / 2, 1, m.botTier || 'player');
       m.p = [p0, p1];
     }
@@ -163,6 +167,7 @@
     }
     if (parrying(d) && !a.unparryable) {
       d.whiffedParry = false;
+      d.pa = -1; // Immediately cancel parry recovery on a successful parry
       if (blink) {
         if (!a.god) applyDamage(a, ev);
         d.points = (d.points || 0) + 25;

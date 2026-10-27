@@ -383,8 +383,8 @@
       return;
     }
     if (mode === 'bot' && M.p[1] && M.p[1].tier !== 'player') {
-      var b = M.p[1];
-      $('s0').textContent = 'YOU ' + (M.p[0] && !M.p[0].dead ? '\u25CF' : '\u25CB');
+      var p0 = M.p[0], b = M.p[1];
+      $('s0').textContent = 'YOU ' + (p0 ? pips(p0.lives, p0.maxLives) : '\u25CB');
       $('s1').textContent = names[1] + ' ' + pips(b.lives, b.maxLives) + (b.maxHearts > 1 ? ' ' + heartPips(b.hearts, b.maxHearts) : '');
       $('rnd').textContent = isBossEncounter ? 'SECRET BOSS: TETANUS' : (b.tier.toUpperCase() + ' DUEL');
       return;
@@ -806,7 +806,6 @@
     beginView();
 
     if (isBossEncounter) {
-      // Heavy bloodstains across the floor for Tetanus stage
       for (var s = 0; s < 14; s++) {
         var bx = 60 + Math.random() * (W - 120);
         var by = 50 + Math.random() * (H - 100);
@@ -1016,7 +1015,7 @@
         shatter(e.x, e.y, c, 10);
         ring(e.x, e.y, c, R + 55, 0.45, 5);
         splat(e.x, e.y, isBossEncounter ? '#5c0a06' : c, 16);
-        say(e.lives + (e.lives === 1 ? ' Life Left!' : ' Lives Left!'), 0.9);
+        say((e.i === 0 ? 'You: ' : '') + e.lives + (e.lives === 1 ? ' Life Left!' : ' Lives Left!'), 0.9);
         shake = 9; punch = 0.025; hitStop(0.09);
       } else if (e.t === 'whiff_parry') {
         ring(e.x, e.y, '#c9331f', R + 45, 0.4, 4);
@@ -1428,8 +1427,8 @@
         drawBlade(ctx, look, px, py, p.fa, c, p.sc > 0);
       }
 
-      // Overhead Lives & Hearts Bar for Multi-Life / Multi-Heart CPUs
-      if (p.tier && p.tier !== 'player') {
+      // Overhead Lives & Hearts Bar for Multi-Life / Multi-Heart fighters
+      if ((p.tier && p.tier !== 'player') || p.maxLives > 1) {
         var barW = Math.max(36, pR * 2.2);
         var sx = px - barW / 2;
         var sy = py - pR - 16;
