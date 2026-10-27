@@ -15,7 +15,8 @@
     { n: 'Silver', min: 500, next: 1000, c: '#b8b3a8' },
     { n: 'Gold', min: 1000, next: 1500, c: '#d9a526' },
     { n: 'Platinum', min: 1500, next: 2000, c: '#8fbfb4' },
-    { n: 'Diamond', min: 2000, next: 2000, c: '#f2ece0' }
+    { n: 'Diamond', min: 2000, next: 2000, c: '#f2ece0' },
+    { n: 'Owner', min: 9999, next: 9999, c: '#e2503a' }
   ];
   var RANK_NAMES = RANKS.map(function (r) { return r.n; });
 
@@ -233,19 +234,19 @@
   }
   function setProfile(p) {
     prof = p;
-    var r = RANKS.filter(function (x) { return x.n === p.rank; })[0];
-    $('badge').textContent = r.n[0];
+    var r = RANKS.filter(function (x) { return x.n === p.rank; })[0] || RANKS[0];
+    $('badge').textContent = p.isOwner ? '👑' : r.n[0];
     $('badge').style.setProperty('--rc', r.c);
-    $('uname').textContent = p.name;
+    $('uname').textContent = (p.isOwner ? '[OWNER] ' : '') + p.name;
     $('rname').textContent = r.n;
     $('rname').style.color = r.c;
     $('mmr').textContent = p.mmr + ' MMR';
     $('wl').textContent = p.wins + 'W ' + p.losses + 'L' + (p.streak >= 2 ? '  \u00D7' + p.streak : '');
-    $('card').title = 'Peak ' + (p.peak || p.mmr) + ' MMR, ' + (p.games || 0) + ' games. Unlocked: ' + (p.unlocked || []).join(', ');
+    $('card').title = (p.isOwner ? 'Owner Account. ' : '') + 'Peak ' + (p.peak || p.mmr) + ' MMR, ' + (p.games || 0) + ' games.';
     var hasNext = r.next > r.min;
     $('prog').style.width = (hasNext ? Math.min(1, (p.mmr - r.min) / (r.next - r.min)) * 100 : 100) + '%';
     $('prog').style.background = r.c;
-    $('nextlbl').textContent = hasNext ? (r.next - p.mmr) + ' to ' + RANKS[RANKS.indexOf(r) + 1].n : 'Top rank';
+    $('nextlbl').textContent = p.isOwner ? 'Infinite Reign' : (hasNext ? (r.next - p.mmr) + ' to ' + RANKS[RANKS.indexOf(r) + 1].n : 'Top rank');
   }
 
   function result(title, d1, d2, delta, sound) {
@@ -390,7 +391,6 @@
   $('coopcategorybtn').onclick = function () { show('coopmenu'); };
   $('coopback').onclick = showLobby;
   $('coop2v2btn').onclick = function () {
-    // Quick-launch private 2v2 party creation
     sock.emit('partyCreate', { mode: '2v2' }, function (r) {
       if (r && r.err) toast(r.err, true);
     });
@@ -449,7 +449,7 @@
     var grid = $('lookgrid'), unlocked = (prof && prof.unlocked) || [], cur = prof && prof.equipped && prof.equipped.look;
     while (grid.firstChild) grid.removeChild(grid.firstChild);
     LOOKS.forEach(function (L) {
-      var open = unlocked.indexOf(L.id) >= 0;
+      var open = (prof && prof.isOwner) || unlocked.indexOf(L.id) >= 0;
       var b = document.createElement('button'), pv = document.createElement('canvas'), nm = document.createElement('span'), sm = document.createElement('small');
       b.className = 'look' + (L.id === cur ? ' sel' : '');
       b.disabled = !open;
@@ -462,7 +462,7 @@
       drawFighter(g, L.id, 0, 0, COL[0], -0.6, performance.now());
       g.restore(); g.globalAlpha = 1;
       nm.textContent = L.name;
-      sm.textContent = L.id === cur ? 'Equipped' : open ? 'Unlocked' : 'Reach ' + L.need;
+      sm.textContent = L.id === cur ? 'Equipped' : open ? (prof && prof.isOwner ? 'Unlocked (Owner)' : 'Unlocked') : 'Reach ' + L.need;
       b.appendChild(pv); b.appendChild(nm); b.appendChild(sm);
       b.onclick = function () { equipLook(L.id); };
       grid.appendChild(b);
@@ -489,7 +489,7 @@
     }
     rows.forEach(function (r, i) {
       var li = document.createElement('li'), a = document.createElement('span'), b = document.createElement('span');
-      a.textContent = (i + 1) + '. ' + r.name;
+      a.textContent = (i + 1) + '. ' + (r.isOwner ? '[OWNER] ' : '') + r.name;
       b.textContent = r.rank + '  ' + r.mmr;
       if (prof && r.name === prof.name) li.className = 'me';
       li.appendChild(a); li.appendChild(b); ol.appendChild(li);
@@ -1055,8 +1055,9 @@
         for (var k = 0; k < 3; k++) { var a = now / 120 + k * 2.1; ctx.beginPath(); ctx.arc(px + Math.cos(a) * 15, py - R - 8 + Math.sin(a) * 4, 3, 0, 7); ctx.stroke(); }
       }
       if ((mode === 'online' || mode === 'ffa') && i === me) {
-        ctx.fillStyle = INK; ctx.font = '600 14px "Barlow Condensed", sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
-        ctx.fillText('YOU', px, py - R - 18);
+        ctx.fillStyle = (prof && prof.isOwner) ? '#c9331f' : INK;
+        ctx.font = '700 14px "Barlow Condensed", sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+        ctx.fillText((prof && prof.isOwner) ? '[OWNER] YOU' : 'YOU', px, py - R - 18);
       }
     });
 

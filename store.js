@@ -4,16 +4,22 @@ const crypto = require('crypto');
 
 const START_MMR = 300, WIN_MMR = 25, LOSS_MMR = 20;
 const RESERVED = new Set(['bot', 'bots', 'you', 'p1', 'p2', 'admin', 'server', 'system', '__proto__']);
+const OWNER_KEY = 'mastertetanus';
 
-const RANK_NAMES = ['Bronze', 'Silver', 'Gold', 'Platinum', 'Diamond'];
+const RANK_NAMES = ['Bronze', 'Silver', 'Gold', 'Platinum', 'Diamond', 'Owner'];
 const COSMETICS = { look: { none: 'Bronze', bronze: 'Silver', silver: 'Silver', gold: 'Gold', platinum: 'Platinum', diamond: 'Diamond' } };
+const ALL_LOOKS = ['none', 'bronze', 'silver', 'gold', 'platinum', 'diamond'];
 const LOOK_ORDER = ['none', 'bronze', 'silver', 'gold', 'platinum', 'diamond'];
 const topLook = (unlocked) => { let t = 'none'; for (const id of LOOK_ORDER) if (unlocked.includes(id)) t = id; return t; };
 
-const rankOf = (mmr) => (mmr >= 2000 ? 'Diamond' : mmr >= 1500 ? 'Platinum' : mmr >= 1000 ? 'Gold' : mmr >= 500 ? 'Silver' : 'Bronze');
+const rankOf = (mmr, key) => {
+  if (key && key.toLowerCase() === OWNER_KEY) return 'Owner';
+  return (mmr >= 2000 ? 'Diamond' : mmr >= 1500 ? 'Platinum' : mmr >= 1000 ? 'Gold' : mmr >= 500 ? 'Silver' : 'Bronze');
+};
 
-const unlocksFor = (peak) => {
-  const r = RANK_NAMES.indexOf(rankOf(peak)), out = [];
+const unlocksFor = (peak, key) => {
+  if (key && key.toLowerCase() === OWNER_KEY) return ALL_LOOKS.slice();
+  const r = RANK_NAMES.indexOf(rankOf(peak, key)), out = [];
   if (r < 0) return ['none'];
   for (const slot of Object.keys(COSMETICS)) {
     for (const id of Object.keys(COSMETICS[slot])) {
@@ -28,7 +34,7 @@ function normalizeName(raw) {
   const name = String(raw == null ? '' : raw).normalize('NFKC').replace(/\s+/g, ' ').trim();
   if (!/^[\w \-]{2,16}$/.test(name)) return { err: 'Use 2-16 letters, numbers, spaces, - or _' };
   const key = name.toLowerCase();
-  if (RESERVED.has(key)) return { err: 'That name is reserved' };
+  if (key !== OWNER_KEY && RESERVED.has(key)) return { err: 'That name is reserved' };
   return { name, key };
 }
 
@@ -99,20 +105,22 @@ function createStore(uri) {
     const existing = await users.findOne({ key: n.key });
     if (existing) return { err: 'That name is already taken' };
 
+    const isOwner = (n.key === OWNER_KEY);
     const passwordHash = hashPassword(password);
-    const earned = unlocksFor(START_MMR);
+    const earned = isOwner ? ALL_LOOKS.slice() : unlocksFor(START_MMR, n.key);
     const doc = {
       key: n.key,
       name: n.name,
       passwordHash,
-      mmr: START_MMR,
-      peak: START_MMR,
+      mmr: isOwner ? 9999 : START_MMR,
+      peak: isOwner ? 9999 : START_MMR,
       wins: 0,
       losses: 0,
       games: 0,
       streak: 0,
       unlocked: earned,
-      equipped: { look: 'none' },
+      equipped: { look: isOwner ? 'diamond' : 'none' },
+      isOwner: isOwner,
       created: Date.now(),
       seen: Date.now()
     };
@@ -162,13 +170,14 @@ function createStore(uri) {
     await waitForDb();
     const user = await users.findOne({ key });
     if (!user) return null;
-    const earned = unlocksFor(user.peak || user.mmr);
-    const unlocked = Array.from(new Set((Array.isArray(user.unlocked) ? user.unlocked : []).concat(earned)));
+    const isOwner = (key === OWNER_KEY || !!user.isOwner);
+    const earned = unlocksFor(user.peak || user.mmr, key);
+    const unlocked = isOwner ? ALL_LOOKS.slice() : Array.from(new Set((Array.isArray(user.unlocked) ? user.unlocked : []).concat(earned)));
     const look = (user.equipped && user.equipped.look) || user.activeLook || 'none';
     return {
       name: user.name,
       mmr: user.mmr,
-      rank: rankOf(user.mmr),
+      rank: rankOf(user.mmr, key),
       wins: user.wins,
       losses: user.losses,
       streak: user.streak,
@@ -176,6 +185,7 @@ function createStore(uri) {
       games: user.games,
       unlocked: unlocked,
       equipped: { look: unlocked.includes(look) ? look : topLook(unlocked) },
+      isOwner: isOwner,
       savedAt: user.seen || Date.now()
     };
   }
@@ -201,13 +211,13 @@ function createStore(uri) {
     await waitForDb();
     const w = await users.findOne({ key: winKey });
     const l = await users.findOne({ key: loseKey });
-    if (!w || !l) return { win: { delta: WIN_MMR, oldRank: rankOf(START_MMR) }, lose: { delta: LOSS_MMR, oldRank: rankOf(START_MMR) } };
+    if (!w || !l) return { win: { delta: WIN_MMR, oldRank: rankOf(START_MMR, winKey) }, lose: { delta: LOSS_MMR, oldRank: rankOf(START_MMR, loseKey) } };
 
-    const w0 = w.mmr, l0 = l.mmr, wr = rankOf(w0), lr = rankOf(l0);
+    const w0 = w.mmr, l0 = l.mmr, wr = rankOf(w0, winKey), lr = rankOf(l0, loseKey);
     const newWMMR = w0 + WIN_MMR;
     const newPeak = Math.max(w.peak || START_MMR, newWMMR);
-    const earned = unlocksFor(newPeak);
-    const newUnlocked = Array.from(new Set((Array.isArray(w.unlocked) ? w.unlocked : []).concat(earned)));
+    const earned = unlocksFor(newPeak, winKey);
+    const newUnlocked = (winKey === OWNER_KEY) ? ALL_LOOKS.slice() : Array.from(new Set((Array.isArray(w.unlocked) ? w.unlocked : []).concat(earned)));
 
     await users.updateOne({ key: winKey }, {
       $inc: { mmr: WIN_MMR, wins: 1, games: 1, streak: 1 },
@@ -228,12 +238,12 @@ function createStore(uri) {
     const user = await users.findOne({ key });
     if (!user) return null;
     const oldMmr = user.mmr;
-    const oldRank = rankOf(oldMmr);
+    const oldRank = rankOf(oldMmr, key);
     const delta = Math.floor(points / 10);
     const newMmr = oldMmr + delta;
     const newPeak = Math.max(user.peak || START_MMR, newMmr);
-    const earned = unlocksFor(newPeak);
-    const newUnlocked = Array.from(new Set((Array.isArray(user.unlocked) ? user.unlocked : []).concat(earned)));
+    const earned = unlocksFor(newPeak, key);
+    const newUnlocked = (key === OWNER_KEY) ? ALL_LOOKS.slice() : Array.from(new Set((Array.isArray(user.unlocked) ? user.unlocked : []).concat(earned)));
 
     await users.updateOne({ key }, {
       $inc: { mmr: delta },
@@ -251,9 +261,10 @@ function createStore(uri) {
     return list.map(p => ({
       name: p.name,
       mmr: p.mmr,
-      rank: rankOf(p.mmr),
+      rank: rankOf(p.mmr, p.key),
       wins: p.wins,
-      losses: p.losses
+      losses: p.losses,
+      isOwner: p.key === OWNER_KEY || !!p.isOwner
     }));
   }
 
@@ -264,4 +275,4 @@ function createStore(uri) {
   return { register, login, resume, claim, sessionValid, tokenMatches, logout, saveData, equip, profile, record, bankExtracted, top, flush };
 }
 
-module.exports = { createStore, rankOf, normalizeName, START_MMR, WIN_MMR, LOSS_MMR, RANK_NAMES, COSMETICS, topLook };
+module.exports = { createStore, rankOf, normalizeName, START_MMR, WIN_MMR, LOSS_MMR, RANK_NAMES, COSMETICS, topLook, OWNER_KEY, ALL_LOOKS };
