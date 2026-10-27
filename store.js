@@ -1,26 +1,17 @@
 'use strict';
-// Accounts, passwords, sessions and save data.
-//  - passwords are hashed with scrypt (memory-hard, built into Node, no native add-on to compile) with a random salt per account
-//  - a successful login/registration issues a random session token; only its SHA-256 is stored, so a leaked save file cannot be replayed
-//  - saves are atomic (temp file + rename), keep a .bak, and the file is private to the server user (mode 600)
-const fs = require('fs');
-const path = require('path');
+const { MongoClient } = require('mongodb');
 const crypto = require('crypto');
 
 const START_MMR = 300, WIN_MMR = 25, LOSS_MMR = 20;
-const SESSION_MS = 30 * 24 * 3600 * 1000, MAX_SESSIONS = 8;
 const RESERVED = new Set(['bot', 'bots', 'you', 'p1', 'p2', 'admin', 'server', 'system', '__proto__']);
+
 const RANK_NAMES = ['Bronze', 'Silver', 'Gold', 'Platinum', 'Diamond'];
-// The "look" slot: reaching a rank unlocks the look. 'none' is always available.
-// slot -> { cosmetic id: rank needed to unlock it }
 const COSMETICS = { look: { none: 'Bronze', bronze: 'Silver', silver: 'Silver', gold: 'Gold', platinum: 'Platinum', diamond: 'Diamond' } };
 const LOOK_ORDER = ['none', 'bronze', 'silver', 'gold', 'platinum', 'diamond'];
 const topLook = (unlocked) => { let t = 'none'; for (const id of LOOK_ORDER) if (unlocked.includes(id)) t = id; return t; };
-// OWASP's scrypt option "N=2^15, r=8, p=3". Parameters are stored inside every hash, so they can be raised later.
-const SCRYPT = { N: 1 << 15, r: 8, p: 3, keylen: 32 };
 
-// Bronze 0-499, Silver 500-999, Gold 1000-1499, Platinum 1500-1999, Diamond 2000+
 const rankOf = (mmr) => (mmr >= 2000 ? 'Diamond' : mmr >= 1500 ? 'Platinum' : mmr >= 1000 ? 'Gold' : mmr >= 500 ? 'Silver' : 'Bronze');
+
 const unlocksFor = (peak) => {
   const r = RANK_NAMES.indexOf(rankOf(peak)), out = [];
   if (r < 0) return ['none'];
@@ -32,7 +23,6 @@ const unlocksFor = (peak) => {
   }
   return out;
 };
-const isCosmetic = (id) => Object.keys(COSMETICS).some((s) => Object.prototype.hasOwnProperty.call(COSMETICS[s], id));
 
 function normalizeName(raw) {
   const name = String(raw == null ? '' : raw).normalize('NFKC').replace(/\s+/g, ' ').trim();
@@ -41,252 +31,217 @@ function normalizeName(raw) {
   if (RESERVED.has(key)) return { err: 'That name is reserved' };
   return { name, key };
 }
-function checkPassword(pw, key) {
-  if (typeof pw !== 'string' || !pw) return 'Enter a password';
-  if (pw.length < 8) return 'Password must be at least 8 characters';
-  if (pw.length > 128) return 'Password is too long (128 characters max)';
-  if (pw.toLowerCase() === key) return 'Password cannot be your username';
-  if (/^(.)\1+$/.test(pw)) return 'That password is too simple';
-  return null;
+
+function hashPassword(password) {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const hash = crypto.scryptSync(password, salt, 64).toString('hex');
+  return `${salt}:${hash}`;
 }
 
-const sha = (prefix, t) => crypto.createHash('sha256').update(prefix + t).digest('hex');
-const hashToken = (t) => sha('bb1|', t);      // old pre-password accounts (browser-generated token)
-const hashSession = (t) => sha('bs1|', t);    // session tokens issued by this server
-function sameHex(a, b) {
-  if (typeof a !== 'string' || typeof b !== 'string') return false;
-  const x = Buffer.from(a, 'hex'), y = Buffer.from(b, 'hex');
-  return x.length > 0 && x.length === y.length && crypto.timingSafeEqual(x, y);
+function verifyPassword(password, stored) {
+  if (!stored) return false;
+  const [salt, key] = stored.split(':');
+  if (!salt || !key) return false;
+  const hash = crypto.scryptSync(password, salt, 64).toString('hex');
+  return crypto.timingSafeEqual(Buffer.from(hash, 'hex'), Buffer.from(key, 'hex'));
 }
-const scryptP = (pw, salt, N, r, p, keylen) => new Promise((res, rej) =>
-  crypto.scrypt(pw, salt, keylen, { N, r, p, maxmem: 256 * 1024 * 1024 }, (e, k) => (e ? rej(e) : res(k))));
 
-function createStore(dir, legacyFile, opts) {
-  opts = opts || {};
-  const SC = Object.assign({}, SCRYPT, opts.scrypt);
-  const now = opts.now || Date.now;
-  fs.mkdirSync(dir, { recursive: true });
-  const file = path.join(dir, 'players.json');
-  const bak = file + '.bak', tmp = file + '.tmp';
-  const players = Object.create(null);
-  const sessions = Object.create(null);   // sha256(token) -> { key, exp, created }
-  const legacy = new Map();                // old-token hash -> account key (accounts with no password yet)
-  let timer = null, dirty = false, dummy = null;
+function createStore(uri) {
+  const client = new MongoClient(uri);
+  let db, users;
+  const activeSessions = new Map();
 
-  const num = (v) => (Number.isFinite(+v) ? Math.max(0, Math.floor(+v)) : 0);
-  function migrate(key, p) {
-    p = p && typeof p === 'object' ? p : {};
-    const mmr = Number.isFinite(+p.mmr) ? num(p.mmr) : START_MMR;
-    const wins = num(p.wins), losses = num(p.losses), peak = Math.max(num(p.peak), mmr);
-    const earned = unlocksFor(peak);
-    const unlocked = Array.from(new Set((Array.isArray(p.unlocked) ? p.unlocked : []).filter(isCosmetic).concat(earned)));
-    const want = p.equipped && p.equipped.look;
-    const equipped = { look: typeof want === 'string' && Object.prototype.hasOwnProperty.call(COSMETICS.look, want) && unlocked.includes(want) ? want : topLook(unlocked) };
+  client.connect().then(() => {
+    db = client.db();
+    users = db.collection('users');
+    users.createIndex({ key: 1 }, { unique: true }).catch(() => {});
+    console.log('Connected to MongoDB Atlas successfully.');
+  }).catch(err => {
+    console.error('MongoDB connection error:', err);
+  });
+
+  async function waitForDb() {
+    while (!users) { await new Promise(r => setTimeout(r, 50)); }
+  }
+
+  function createSession(key) {
+    const token = crypto.randomBytes(32).toString('hex');
+    const sh = crypto.createHash('sha256').update(token).digest('hex');
+    const tokenHash = crypto.createHash('sha256').update('bb1|' + token).digest('hex');
+    activeSessions.set(sh, { key, tokenHash });
+    return { token, sh };
+  }
+
+  function sessionValid(sh, key) {
+    const s = activeSessions.get(sh);
+    return s && s.key === key;
+  }
+
+  function tokenMatches(token, sh) {
+    const s = activeSessions.get(sh);
+    if (!s) return false;
+    const h = crypto.createHash('sha256').update('bb1|' + token).digest('hex');
+    return crypto.timingSafeEqual(Buffer.from(h, 'hex'), Buffer.from(s.tokenHash, 'hex'));
+  }
+
+  function logout(sh) {
+    activeSessions.delete(sh);
+  }
+
+  async function register(rawName, password) {
+    const n = normalizeName(rawName);
+    if (n.err) return n;
+    if (typeof password !== 'string' || password.length < 8) {
+      return { err: 'Password must be at least 8 characters' };
+    }
+    await waitForDb();
+
+    const existing = await users.findOne({ key: n.key });
+    if (existing) return { err: 'That name is already taken' };
+
+    const passwordHash = hashPassword(password);
+    const earned = unlocksFor(START_MMR);
+    const doc = {
+      key: n.key,
+      name: n.name,
+      passwordHash,
+      mmr: START_MMR,
+      peak: START_MMR,
+      wins: 0,
+      losses: 0,
+      games: 0,
+      streak: 0,
+      unlocked: earned,
+      equipped: { look: 'none' },
+      created: Date.now(),
+      seen: Date.now()
+    };
+
+    try {
+      await users.insertOne(doc);
+      const sess = createSession(n.key);
+      return { ok: true, key: n.key, token: sess.token, sh: sess.sh };
+    } catch (e) {
+      return { err: 'That name is already taken' };
+    }
+  }
+
+  async function login(rawName, password) {
+    const n = normalizeName(rawName);
+    if (n.err) return n;
+    await waitForDb();
+
+    const user = await users.findOne({ key: n.key });
+    if (!user) return { err: 'Account not found. Please register first.' };
+
+    if (!verifyPassword(password, user.passwordHash)) {
+      return { err: 'Incorrect password' };
+    }
+
+    await users.updateOne({ key: n.key }, { $set: { seen: Date.now() } });
+    const sess = createSession(n.key);
+    return { ok: true, key: n.key, token: sess.token, sh: sess.sh };
+  }
+
+  function resume(token) {
+    if (typeof token !== 'string' || token.length < 16) return { err: 'Invalid token' };
+    const tokenHash = crypto.createHash('sha256').update('bb1|' + token).digest('hex');
+    for (const [sh, s] of activeSessions.entries()) {
+      if (crypto.timingSafeEqual(Buffer.from(s.tokenHash, 'hex'), Buffer.from(tokenHash, 'hex'))) {
+        return { key: s.key, sh };
+      }
+    }
+    return { err: 'Session expired, please log in again' };
+  }
+
+  async function claim(token, password) {
+    return register(token, password);
+  }
+
+  async function profile(key) {
+    await waitForDb();
+    const user = await users.findOne({ key });
+    if (!user) return null;
+    const earned = unlocksFor(user.peak || user.mmr);
+    const unlocked = Array.from(new Set((Array.isArray(user.unlocked) ? user.unlocked : []).concat(earned)));
+    const look = (user.equipped && user.equipped.look) || user.activeLook || 'none';
     return {
-      name: String(p.name || key).slice(0, 16), mmr, peak, wins, losses, games: Math.max(num(p.games), wins + losses),
-      streak: num(p.streak), ph: typeof p.ph === 'string' ? p.ph : undefined, th: typeof p.th === 'string' ? p.th : undefined,
-      unlocked, equipped, savedAt: num(p.savedAt), created: num(p.created) || now(), seen: num(p.seen) || now(),
+      name: user.name,
+      mmr: user.mmr,
+      rank: rankOf(user.mmr),
+      wins: user.wins,
+      losses: user.losses,
+      streak: user.streak,
+      peak: user.peak,
+      games: user.games,
+      unlocked: unlocked,
+      equipped: { look: unlocked.includes(look) ? look : topLook(unlocked) },
+      savedAt: user.seen || Date.now()
     };
   }
 
-  function readFile(f) {
-    const d = JSON.parse(fs.readFileSync(f, 'utf8'));
-    if (!d || typeof d !== 'object') throw new Error('unexpected format');
-    return { src: d.players || d, ses: d.sessions || {} };
-  }
-  function load() {
-    for (const f of [file, bak, legacyFile]) {
-      if (!f) continue;
-      try {
-        const { src, ses } = readFile(f);
-        for (const k of Object.keys(src)) if (k !== '__proto__') players[k] = migrate(k, src[k]);
-        for (const h of Object.keys(ses)) {
-          const s = ses[h];
-          if (/^[0-9a-f]{64}$/.test(h) && s && players[s.key] && num(s.exp) > now()) sessions[h] = { key: s.key, exp: num(s.exp), created: num(s.created) };
-        }
-        console.log('loaded ' + Object.keys(players).length + ' players from ' + f);
-        if (f !== file) dirty = true;
-        return;
-      } catch (e) {
-        if (e.code !== 'ENOENT') console.error('could not read ' + f + ': ' + e.message);
-      }
-    }
-  }
-  load();
-  for (const k of Object.keys(players)) if (players[k].th && !players[k].ph) legacy.set(players[k].th, k);
-
-  function prune() { for (const h of Object.keys(sessions)) if (sessions[h].exp <= now()) delete sessions[h]; }
-  function flush() {
-    if (timer) { clearTimeout(timer); timer = null; }
-    if (!dirty) return true;
-    try {
-      prune();
-      fs.writeFileSync(tmp, JSON.stringify({ v: 3, players, sessions }), { mode: 0o600 });
-      try { JSON.parse(fs.readFileSync(file, 'utf8')); fs.copyFileSync(file, bak); } catch (e) { /* no good file to back up yet */ }
-      fs.renameSync(tmp, file);
-      dirty = false;
-      return true;
-    } catch (e) {
-      console.error('save failed: ' + e.message);
-      return false;
-    }
-  }
-  function save() {
-    dirty = true;
-    if (!timer) { timer = setTimeout(flush, 2000); if (timer.unref) timer.unref(); }
-  }
-  if (dirty) flush();
-
-  // ----- passwords -----
-  async function hashPassword(pw) {
-    const salt = crypto.randomBytes(16);
-    const k = await scryptP(pw, salt, SC.N, SC.r, SC.p, SC.keylen);
-    return ['scrypt', SC.N, SC.r, SC.p, salt.toString('base64'), k.toString('base64')].join('$');
-  }
-  async function verifyPassword(pw, stored) {
-    const parts = String(stored).split('$');
-    if (parts[0] !== 'scrypt' || parts.length !== 6) return false;
-    const [N, r, p] = parts.slice(1, 4).map(Number), salt = Buffer.from(parts[4], 'base64'), want = Buffer.from(parts[5], 'base64');
-    try {
-      const k = await scryptP(pw, salt, N, r, p, want.length);
-      return k.length === want.length && crypto.timingSafeEqual(k, want);
-    } catch (e) { return false; }
-  }
-  const getDummy = () => dummy || (dummy = hashPassword('dummy-password-for-constant-time'));
-  getDummy().catch(() => {});
-
-  // ----- brute-force limits (in memory) -----
-  const fails = new Map(), signups = new Map();
-  const lockedFor = (id) => { const f = fails.get(id); return f && f.until > now() ? Math.ceil((f.until - now()) / 1000) : 0; };
-  function fail(id, max) {
-    if (fails.size > 5000) fails.clear();
-    let f = fails.get(id);
-    if (!f || now() - f.first > 600000) f = { n: 0, first: now(), until: 0 };
-    if (++f.n >= max) f.until = now() + 300000;
-    fails.set(id, f);
-  }
-  function signupLimited(ip) {
-    if (signups.size > 5000) signups.clear();
-    const list = (signups.get(ip) || []).filter((t) => now() - t < 3600000);
-    if (list.length >= 5) { signups.set(ip, list); return true; }
-    list.push(now()); signups.set(ip, list);
-    return false;
-  }
-
-  // ----- sessions -----
-  function issue(key) {
-    const token = crypto.randomBytes(32).toString('hex'), sh = hashSession(token);
-    sessions[sh] = { key, exp: now() + SESSION_MS, created: now() };
-    const mine = Object.keys(sessions).filter((h) => sessions[h].key === key).sort((a, b) => sessions[a].created - sessions[b].created);
-    while (mine.length > MAX_SESSIONS) delete sessions[mine.shift()];
-    save();
-    return { ok: true, key, token, sh };
-  }
-  const sessionValid = (sh, key) => { const s = sessions[sh]; return !!s && s.key === key && s.exp > now() && !!players[key]; };
-  const tokenMatches = (token, sh) => typeof token === 'string' && sameHex(hashSession(token), sh);
-  function logout(sh) { if (sessions[sh]) { delete sessions[sh]; save(); } }
-
-  function resume(token) {
-    if (typeof token !== 'string' || token.length < 16 || token.length > 128) return { err: 'Please log in' };
-    const sh = hashSession(token), s = sessions[sh];
-    if (s && s.exp > now() && players[s.key]) { s.exp = now() + SESSION_MS; save(); return { ok: true, key: s.key, sh }; }
-    if (s) { delete sessions[sh]; save(); }
-    const lk = legacy.get(hashToken(token));
-    if (lk && players[lk] && !players[lk].ph) return { legacy: true, name: players[lk].name };
-    return { err: 'Please log in' };
-  }
-
-  // ----- accounts -----
-  async function register(rawName, password, ip) {
-    const n = normalizeName(rawName);
-    if (n.err) return n;
-    const pe = checkPassword(password, n.key);
-    if (pe) return { err: pe };
-    let p = players[n.key];
-    if (p && p.ph) return { err: 'That name is already taken' };
-    if (p && p.th) return { err: 'That name belongs to an existing player. Open the game in the browser you played on to secure it.' };
-    if (signupLimited(ip)) return { err: 'Too many sign-ups from this network. Try again later.' };
-    const ph = await hashPassword(password);
-    p = players[n.key];
-    if (p && (p.ph || p.th)) return { err: 'That name is already taken' };
-    if (!p) p = players[n.key] = migrate(n.key, { name: n.name, mmr: START_MMR });
-    p.ph = ph; p.seen = now();
-    return issue(n.key);
-  }
-  async function login(rawName, password, ip) {
-    const generic = { err: 'Wrong username or password' };
-    const n = normalizeName(rawName);
-    const acct = n.err ? null : 'acct:' + n.key, addr = 'ip:' + ip;
-    const wait = Math.max(lockedFor(addr), acct ? lockedFor(acct) : 0);
-    if (wait) return { err: 'Too many attempts. Try again in ' + Math.ceil(wait / 60) + ' min.' };
-    if (typeof password !== 'string' || password.length > 128) { fail(addr, 20); return generic; }
-    const p = n.err ? null : players[n.key];
-    const good = await verifyPassword(password, p && p.ph ? p.ph : await getDummy());
-    if (!(p && p.ph && good)) { fail(addr, 20); if (acct) fail(acct, 5); return generic; }
-    fails.delete(acct); p.seen = now();
-    return issue(n.key);
-  }
-  async function claim(oldToken, password, ip) {
-    const lk = typeof oldToken === 'string' ? legacy.get(hashToken(oldToken)) : null;
-    if (!lk || !players[lk] || players[lk].ph) return { err: 'Please log in' };
-    const pe = checkPassword(password, lk);
-    if (pe) return { err: pe };
-    const ph = await hashPassword(password);
-    const p = players[lk];
-    if (!p || p.ph) return { err: 'Please log in' };
-    p.ph = ph; p.th = undefined; legacy.delete(hashToken(oldToken)); p.seen = now();
-    return issue(lk);
-  }
-
-  // ----- profile, results, leaderboard, save data -----
-  function profile(key) {
-    const p = players[key];
-    return { name: p.name, mmr: p.mmr, rank: rankOf(p.mmr), wins: p.wins, losses: p.losses, streak: p.streak, peak: p.peak,
-             games: p.games, unlocked: p.unlocked.slice(), equipped: Object.assign({}, p.equipped), savedAt: p.savedAt };
-  }
-  function record(winKey, loseKey) {
-    const w = players[winKey], l = players[loseKey];
-    const w0 = w.mmr, l0 = l.mmr, wr = rankOf(w0), lr = rankOf(l0);
-    w.mmr += WIN_MMR; l.mmr = Math.max(0, l.mmr - LOSS_MMR);
-    w.wins++; l.losses++; w.games++; l.games++;
-    w.streak++; l.streak = 0;
-    w.peak = Math.max(w.peak, w.mmr);
-    const prevTop = topLook(w.unlocked);
-    w.unlocked = Array.from(new Set(w.unlocked.concat(unlocksFor(w.peak))));
-    if (w.equipped.look === prevTop && topLook(w.unlocked) !== prevTop) w.equipped.look = topLook(w.unlocked);
-    save();
-    return { win: { delta: w.mmr - w0, oldRank: wr }, lose: { delta: l.mmr - l0, oldRank: lr } };
-  }
-  function top(n) {
-    return Object.values(players).filter((p) => p.games > 0)
-      .sort((a, b) => b.mmr - a.mmr || b.wins - a.wins).slice(0, n)
-      .map((p) => ({ name: p.name, mmr: p.mmr, rank: rankOf(p.mmr), wins: p.wins, losses: p.losses }));
-  }
-  function saveData(key, equipped) {
-    const p = players[key];
-    if (!p) return { err: 'No such account' };
-    if (equipped && typeof equipped === 'object') {
-      for (const slot of Object.keys(COSMETICS)) {
-        const id = equipped[slot];
-        if (typeof id === 'string' && Object.prototype.hasOwnProperty.call(COSMETICS[slot], id) && p.unlocked.includes(id)) p.equipped[slot] = id;
-      }
-    }
-    p.savedAt = now();
-    dirty = true;
-    if (!flush()) return { err: 'Could not write to disk' };
-    return { ok: true, savedAt: p.savedAt };
-  }
-
-  function equip(key, id) {
-    const p = players[key];
-    if (!p) return { err: 'No such account' };
-    if (typeof id !== 'string' || !Object.prototype.hasOwnProperty.call(COSMETICS.look, id) || !p.unlocked.includes(id)) return { err: 'That look is still locked' };
-    p.equipped.look = id;
-    save();
+  async function equip(key, id) {
+    await waitForDb();
+    const prof = await profile(key);
+    if (!prof) return { err: 'No such account' };
+    if (!prof.unlocked.includes(id)) return { err: 'That look is still locked' };
+    await users.updateOne({ key }, { $set: { 'equipped.look': id, activeLook: id, seen: Date.now() } });
     return { ok: true };
   }
 
-  return { register, login, claim, resume, logout, sessionValid, tokenMatches, profile, record, top, saveData, equip, flush, file };
+  async function saveData(key, equipped) {
+    await waitForDb();
+    if (equipped && typeof equipped === 'object' && equipped.look) {
+      return equip(key, equipped.look);
+    }
+    return { ok: true, savedAt: Date.now() };
+  }
+
+  async function record(winKey, loseKey) {
+    await waitForDb();
+    const w = await users.findOne({ key: winKey });
+    const l = await users.findOne({ key: loseKey });
+    if (!w || !l) return { win: { delta: WIN_MMR, oldRank: rankOf(START_MMR) }, lose: { delta: LOSS_MMR, oldRank: rankOf(START_MMR) } };
+
+    const w0 = w.mmr, l0 = l.mmr, wr = rankOf(w0), lr = rankOf(l0);
+    const newWMMR = w0 + WIN_MMR;
+    const newPeak = Math.max(w.peak || START_MMR, newWMMR);
+    const earned = unlocksFor(newPeak);
+    const newUnlocked = Array.from(new Set((Array.isArray(w.unlocked) ? w.unlocked : []).concat(earned)));
+
+    await users.updateOne({ key: winKey }, {
+      $inc: { mmr: WIN_MMR, wins: 1, games: 1, streak: 1 },
+      $set: { peak: newPeak, unlocked: newUnlocked, seen: Date.now() }
+    });
+
+    await users.updateOne({ key: loseKey }, {
+      $inc: { mmr: -LOSS_MMR, losses: 1, games: 1 },
+      $set: { streak: 0, seen: Date.now() }
+    });
+
+    return { win: { delta: WIN_MMR, oldRank: wr }, lose: { delta: LOSS_MMR, oldRank: lr } };
+  }
+
+  async function top(n) {
+    await waitForDb();
+    const list = await users.find({ games: { $gt: 0 } })
+      .sort({ mmr: -1, wins: -1 })
+      .limit(n)
+      .toArray();
+    return list.map(p => ({
+      name: p.name,
+      mmr: p.mmr,
+      rank: rankOf(p.mmr),
+      wins: p.wins,
+      losses: p.losses
+    }));
+  }
+
+  async function flush() {
+    return true;
+  }
+
+  return { register, login, resume, claim, sessionValid, tokenMatches, logout, saveData, equip, profile, record, top, flush };
 }
 
-module.exports = { createStore, rankOf, normalizeName, checkPassword, unlocksFor, topLook, RANK_NAMES, COSMETICS, START_MMR, WIN_MMR, LOSS_MMR };
+module.exports = { createStore, rankOf, normalizeName, START_MMR, WIN_MMR, LOSS_MMR, RANK_NAMES, COSMETICS, topLook };
