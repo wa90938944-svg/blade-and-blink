@@ -223,13 +223,12 @@
   function showLobby() {
     $('card').style.display = prof ? '' : 'none';
     $('rank').disabled = !prof;
-    $('partybtn').hidden = !prof;
-    $('ffabtn').hidden = !prof;
+    $('coopcategorybtn').hidden = !prof;
     $('boardbtn').hidden = !sock;
     $('lookbtn').hidden = !prof;
     $('savebtn').hidden = !prof;
     $('logout').hidden = !prof;
-    $('local').hidden = touch;
+    $('cooplocalbtn').hidden = touch;
     show('lobby');
   }
   function setProfile(p) {
@@ -373,9 +372,7 @@
   };
   $('offline').onclick = function () { prof = null; showLobby(); };
   $('rank').onclick = enterQueue;
-  $('ffabtn').onclick = enterFFAQueue;
   $('bot').onclick = function () { startLocal('bot'); };
-  $('local').onclick = function () { startLocal('local'); };
   $('endless').onclick = function () { startLocal('endless'); };
   $('cancel').onclick = function () { sock.emit('unqueue'); sock.emit('unqueueFFA'); clearInterval(qI); showLobby(); };
   $('tolobby').onclick = showLobby;
@@ -389,9 +386,21 @@
   };
   $('boardback').onclick = showLobby;
 
+  // ---------- Co-op & Modes Hub ----------
+  $('coopcategorybtn').onclick = function () { show('coopmenu'); };
+  $('coopback').onclick = showLobby;
+  $('coop2v2btn').onclick = function () {
+    // Quick-launch private 2v2 party creation
+    sock.emit('partyCreate', { mode: '2v2' }, function (r) {
+      if (r && r.err) toast(r.err, true);
+    });
+  };
+  $('coopextractbtn').onclick = enterFFAQueue;
+  $('cooppartybtn').onclick = function () { show('partymenu'); };
+  $('cooplocalbtn').onclick = function () { startLocal('local'); };
+
   // ---------- Private Parties UI ----------
-  $('partybtn').onclick = function () { show('partymenu'); };
-  $('partyback').onclick = showLobby;
+  $('partyback').onclick = function () { show('coopmenu'); };
   $('partycreate').onclick = function () {
     var m = $('partymode').value;
     sock.emit('partyCreate', { mode: m }, function (r) {
@@ -1051,7 +1060,6 @@
       }
     });
 
-    // Blink charge diamonds
     var selfP = M.p[me || 0];
     if (selfP && !selfP.dead && (!M.endless || me === 0)) {
       var bx = 20;

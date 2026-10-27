@@ -80,6 +80,12 @@ button:focus-visible{outline:3px solid var(--gold);outline-offset:3px}
 .tb.red b{color:var(--bone)}
 .tb.down{translate:2px 2px;box-shadow:1px 1px 0 #000}
 .tb.cd{opacity:.4}
+
+/* Big Button Styling for the Co-op & Modes Screen */
+.big-opt{padding:14px 18px;font-size:22px;letter-spacing:.08em;display:flex;flex-direction:column;gap:3px;align-items:center;justify-content:center}
+.big-opt small{font-size:13px;letter-spacing:.04em;text-transform:none;color:var(--dim);font-weight:500}
+.big-opt:hover small{color:var(--ink)}
+
 @media (pointer:coarse){
   body{padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);gap:8px;overscroll-behavior:none;-webkit-touch-callout:none;height:100dvh}
   #ov{position:fixed;z-index:30;padding:max(12px,env(safe-area-inset-top)) 12px max(12px,env(safe-area-inset-bottom))}
@@ -128,6 +134,7 @@ input:disabled{opacity:.6}
         <button class="ghost" id="switch">New here? Create an account</button>
         <button class="ghost" id="offline">Play offline without an account</button>
       </div>
+
       <div class="screen" id="lobby">
         <div id="card">
           <div id="badge">B</div>
@@ -139,14 +146,37 @@ input:disabled{opacity:.6}
           </div>
         </div>
         <button id="rank">Find Ranked 1v1</button>
-        <button class="sec" id="ffabtn" hidden>FFA Shrine Extraction</button>
-        <button class="sec" id="partybtn" hidden>Custom Party / 2v2</button>
-        <div class="row"><button class="sec" id="bot">Duel the bot</button><button class="sec" id="local">2 players, one keyboard</button></div>
-        <button class="sec" id="endless">Endless bot mode</button>
+        <button class="sec" id="coopcategorybtn">Co-op &amp; Modes</button>
+        <div class="row">
+          <button class="sec" id="bot">Duel the bot</button>
+          <button class="sec" id="endless">Endless bots</button>
+        </div>
         <div class="row"><button class="sec" id="savebtn" hidden>Save data</button><button class="sec" id="logout" hidden>Log out</button></div>
         <div class="row"><button class="sec" id="lookbtn" hidden>Your look</button><button class="sec" id="boardbtn" hidden>Leaderboard</button></div>
         <p id="hint">Ranked: WASD move, mouse aims, click swings, right-click or E parries, Space blinks.</p>
         <p class="stats"></p>
+      </div>
+
+      <div class="screen" id="coopmenu">
+        <h2>Co-op &amp; Modes</h2>
+        <p>Choose an arena mode or party with friends.</p>
+        <button class="sec big-opt" id="coop2v2btn">
+          Duel 2v2
+          <small>Team up: 2 Black vs 2 Red fighters</small>
+        </button>
+        <button class="sec big-opt" id="coopextractbtn">
+          Shrine Extraction
+          <small>FFA Arena: gather Essence, channel, and bank rank points</small>
+        </button>
+        <button class="sec big-opt" id="cooppartybtn">
+          Private Party
+          <small>Custom room code lobbies with friends</small>
+        </button>
+        <button class="sec big-opt" id="cooplocalbtn">
+          2 Players, 1 Keyboard
+          <small>Classic local battle on a shared screen</small>
+        </button>
+        <button class="ghost" id="coopback">Back to Lobby</button>
       </div>
 
       <div class="screen" id="partymenu">
