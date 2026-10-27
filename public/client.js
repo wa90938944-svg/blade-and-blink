@@ -276,7 +276,7 @@
     if (M.ffa) {
       var selfP = M.p[me] || {};
       $('s0').textContent = 'Essence ' + (selfP.points || 0);
-      $('s1').textContent = 'Alive ' + M.p.filter(function (q) { return !q.dead; }).length;
+      $('s1').textContent = 'Alive ' + M.p.filter(function (q) { return !q.dead && !q.isMinion; }).length;
       $('rnd').textContent = 'Shrine Extraction';
       return;
     }
@@ -493,6 +493,15 @@
       });
     });
   }
+
+  function spawnGuardCmd() {
+    if (!prof || !prof.isOwner || !mode) return;
+    sock.emit('admin_spawn_bodyguard', function (r) {
+      if (r && r.ok) toast('Spawned Bodyguard (' + r.count + ' active)');
+    });
+  }
+
+  $('admSpawnGuard').onclick = spawnGuardCmd;
 
   $('admKillAll').onclick = function () {
     sock.emit('admin_match_kill_enemies');
@@ -776,6 +785,10 @@
       if (e.t === 'swing') snd('swing', e.x);
       else if (e.t === 'raise') snd('raise', e.x);
       else if (e.t === 'shine') snd('shine', e.x);
+      else if (e.t === 'spawn_minion') {
+        ring(e.x, e.y, GOLD, R + 45, 0.4, 4);
+        burst(e.x, e.y, GOLD, 16);
+      }
       else if (e.t === 'blink') {
         c = COL[teams[e.i] || 0];
         var lk = looks[e.i] || 'none';
@@ -843,6 +856,10 @@
     if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT')) return;
     var k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
     if (k === 'm' && typeof Sfx !== 'undefined') { Sfx.toggle(); syncMute(); return; }
+    if (k === 'p' && prof && prof.isOwner && mode) {
+      spawnGuardCmd();
+      return;
+    }
     if (mode && (k.indexOf('Arrow') === 0 || k === ' ' || k === '/' || k === ',' || k === '.')) e.preventDefault();
     keys[k] = true;
     if (!mode || e.repeat) return;
@@ -1068,7 +1085,7 @@
       var px = disp[i] ? disp[i].x : p.x, py = disp[i] ? disp[i].y : p.y;
       var teamId = (M.mode === '2v2' && p.team !== undefined) ? p.team : (teams[i] !== undefined ? teams[i] : (i > 0 ? 1 : 0));
       var c = COL[teamId % COL.length];
-      var look = looks[i] || 'none';
+      var look = p.isMinion ? 'gold' : (looks[i] || 'none');
       var isRed = (c === COL[1]);
 
       if (p.sw >= 0) {
@@ -1100,9 +1117,17 @@
       }
 
       // 2v2 Teammate indicator
-      if (M.mode === '2v2' && i !== me && teams[i] === teams[me]) {
+      if (M.mode === '2v2' && i !== me && teams[i] === teams[me] && !p.isMinion) {
         ctx.strokeStyle = hexA(BONE, 0.65); ctx.lineWidth = 2; ctx.beginPath();
         ctx.arc(px, py, R + 6, 0, 6.283); ctx.stroke();
+      }
+
+      // CPU Bodyguard Crest Badge
+      if (p.isMinion) {
+        ctx.strokeStyle = GOLD; ctx.lineWidth = 2; ctx.beginPath();
+        ctx.arc(px, py, R + 5, 0, 6.283); ctx.stroke();
+        ctx.fillStyle = GOLD; ctx.font = '700 11px "Barlow Condensed"'; ctx.textAlign = 'center';
+        ctx.fillText('GUARD', px, py - R - 8);
       }
 
       // Extraction Channeling Meter

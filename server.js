@@ -449,7 +449,7 @@ io.on('connection', (s) => {
     if (!room || !isOwnerSocket(s)) return;
     const myIdx = s.data.idx;
     room.m.p.forEach((p, idx) => {
-      if (idx !== myIdx && !p.dead) {
+      if (idx !== myIdx && !p.dead && !p.isMinion) {
         p.dead = true;
       }
     });
@@ -472,6 +472,19 @@ io.on('connection', (s) => {
     if (p) {
       p.noCd = !p.noCd;
       if (typeof cb === 'function') cb({ noCd: p.noCd });
+    }
+  });
+
+  s.on('admin_spawn_bodyguard', (cb) => {
+    const room = s.data.room;
+    if (!room || !isOwnerSocket(s)) return;
+    const myIdx = s.data.idx;
+    const ev = [];
+    const minion = G.spawnBodyguard(room.m, myIdx, ev);
+    if (minion) {
+      room.inp.push({});
+      io.to(room.id).emit('s', { m: room.m, ev: ev });
+      if (typeof cb === 'function') cb({ ok: true, count: room.m.p.filter(x => x.isMinion && x.ownerIdx === myIdx && !x.dead).length });
     }
   });
 

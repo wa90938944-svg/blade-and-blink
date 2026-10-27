@@ -10,7 +10,7 @@
       i: i, x: x, y: y === undefined ? H / 2 : y, fa: fa, ch: 3, rc: 0, st: 0, sw: -1, hs: [],
       pa: -1, bc: 0, sc: 0, bw: 0, bdx: 0, bdy: 0, dead: false, ix: 0, iy: 0, spd: 200,
       team: team !== undefined ? team : i, extract: 0, points: 0, kills: 0, parries: 0, blinks: 0,
-      god: false, noCd: false
+      god: false, noCd: false, isMinion: false, ownerIdx: -1, at: 0, ax: 0, ay: 0
     };
   }
   function cl(v, a, b) { return Math.max(a, Math.min(b, v)); }
@@ -71,20 +71,53 @@
     return m;
   }
 
+  function spawnBodyguard(m, ownerIdx, ev) {
+    var owner = m.p[ownerIdx];
+    if (!owner) return null;
+    var idx = m.p.length;
+    var a = Math.random() * 6.283;
+    var x = cl(owner.x + Math.cos(a) * 40, R + 5, W - R - 5);
+    var y = cl(owner.y + Math.sin(a) * 40, R + 5, H - R - 5);
+    var bg = mk(idx, x, owner.fa, y, owner.team);
+    bg.isMinion = true;
+    bg.ownerIdx = ownerIdx;
+    bg.spd = 195;
+    m.p.push(bg);
+    ev.push({ t: 'spawn_minion', i: idx, x: x, y: y, owner: ownerIdx });
+    return bg;
+  }
+
   function foes(m, i) {
     var self = m.p[i];
     if (!self) return [];
+    if (self.isMinion) {
+      return m.p.filter(function (q) {
+        return q && !q.dead && q.i !== self.ownerIdx && !q.isMinion;
+      });
+    }
     if (m.endless) {
-      if (i === 0) return m.p.filter(function (q, j) { return j > 0 && !q.dead; });
+      if (i === 0) return m.p.filter(function (q, j) { return j > 0 && !q.dead && !q.isMinion; });
       return m.p[0].dead ? [] : [m.p[0]];
     }
     if (m.ffa) {
-      return m.p.filter(function (q) { return q.i !== i && !q.dead; });
+      return m.p.filter(function (q) {
+        if (q.i === i || q.dead) return false;
+        if (q.isMinion && q.ownerIdx === i) return false;
+        return true;
+      });
     }
     if (m.mode === '2v2') {
-      return m.p.filter(function (q) { return q.team !== self.team && !q.dead; });
+      return m.p.filter(function (q) {
+        if (q.dead) return false;
+        if (q.isMinion && q.ownerIdx === i) return false;
+        return q.team !== self.team;
+      });
     }
-    return [m.p[1 - i]];
+    return m.p.filter(function (q) {
+      if (q.dead) return false;
+      if (q.isMinion && q.ownerIdx === i) return false;
+      return q.i !== i;
+    });
   }
 
   function resolve(a, d, ev, blink) {
@@ -149,6 +182,37 @@
     p.x = nx; p.y = ny; p.bc = p.noCd ? 0 : BLINK_REC; p.sw = -1;
   }
 
+  function bodyguardAI(m, b, dt) {
+    b.at -= dt;
+    var enemies = foes(m, b.i);
+    var o = {};
+    if (!enemies.length) return { x: 0, y: 0 };
+
+    var target = null, minDist = 999999;
+    for (var k = 0; k < enemies.length; k++) {
+      var d = Math.hypot(enemies[k].x - b.x, enemies[k].y - b.y);
+      if (d < minDist) { minDist = d; target = enemies[k]; }
+    }
+    if (!target) return { x: 0, y: 0 };
+
+    if (b.at <= 0) {
+      b.at = 0.08 + Math.random() * 0.1;
+      var dx = target.x - b.x, dy = target.y - b.y, dist = Math.hypot(dx, dy) || 1;
+      var ux = dx / dist, uy = dy / dist;
+      var face = Math.cos(b.fa) * ux + Math.sin(b.fa) * uy;
+      b.ax = ux; b.ay = uy;
+
+      if (dist > 150 && b.ch > 0 && Math.random() < 0.25) {
+        o.bl = true;
+      } else if (dist < R + REACH - 2) {
+        if (target.sw >= 0 && target.sw < 0.2 && Math.random() < 0.4) o.pa = true;
+        else if (face > 0.65 || target.st > 0) o.sw = true;
+      }
+    }
+    o.x = b.ax; o.y = b.ay;
+    return o;
+  }
+
   function botAI(m, b, dt) {
     var a = m.p[0];
     b.at -= dt;
@@ -186,11 +250,24 @@
   function endlessStep(m, inp, dt, ev) {
     m.time += dt; m.sp -= dt;
     if (m.sp <= 0) { spawnBot(m, ev); m.sp = SPAWN_T; }
-    for (var j = 1; j < m.p.length; j++) if (!m.p[j].dead) inp[j] = botAI(m, m.p[j], dt);
+    for (var j = 1; j < m.p.length; j++) {
+      if (!m.p[j].dead) {
+        if (m.p[j].isMinion) inp[j] = bodyguardAI(m, m.p[j], dt);
+        else inp[j] = botAI(m, m.p[j], dt);
+      }
+    }
   }
 
   function simulate(m, inp, dt, ev) {
     var n = m.p.length, i, j, p, o, q, u, l, fs;
+
+    for (i = 0; i < n; i++) {
+      p = m.p[i];
+      if (p && !p.dead && p.isMinion) {
+        inp[i] = bodyguardAI(m, p, dt);
+      }
+    }
+
     for (i = 0; i < n; i++) {
       p = m.p[i]; if (!p || p.dead) continue;
       if (p.noCd) {
@@ -228,7 +305,7 @@
         p.x = cl(p.x + p.ix * sp * dt, R, W - R);
         p.y = cl(p.y + p.iy * sp * dt, R, H - R);
         p.extract = 0;
-      } else if (m.ffa && m.shrines && p.sw < 0 && p.pa < 0 && p.bw <= 0) {
+      } else if (m.ffa && m.shrines && p.sw < 0 && p.pa < 0 && p.bw <= 0 && !p.isMinion) {
         var near = false;
         for (var sIdx = 0; sIdx < m.shrines.length; sIdx++) {
           var sh = m.shrines[sIdx];
@@ -247,17 +324,15 @@
         p.extract = 0;
       }
     }
-    if (m.endless || m.mode === '2v2' || m.ffa) {
-      for (i = 0; i < n; i++) {
-        p = m.p[i]; if (!p || p.dead) continue;
-        for (j = i + 1; j < n; j++) {
-          q = m.p[j]; if (!q || q.dead) continue;
-          var sx = q.x - p.x, sy = q.y - p.y, sd = Math.hypot(sx, sy);
-          if (sd > 0 && sd < R * 2) {
-            var ps = (R * 2 - sd) / 2; sx /= sd; sy /= sd;
-            p.x = cl(p.x - sx * ps, R, W - R); p.y = cl(p.y - sy * ps, R, H - R);
-            q.x = cl(q.x + sx * ps, R, W - R); q.y = cl(q.y + sy * ps, R, H - R);
-          }
+    for (i = 0; i < n; i++) {
+      p = m.p[i]; if (!p || p.dead) continue;
+      for (j = i + 1; j < n; j++) {
+        q = m.p[j]; if (!q || q.dead) continue;
+        var sx = q.x - p.x, sy = q.y - p.y, sd = Math.hypot(sx, sy);
+        if (sd > 0 && sd < R * 2) {
+          var ps = (R * 2 - sd) / 2; sx /= sd; sy /= sd;
+          p.x = cl(p.x - sx * ps, R, W - R); p.y = cl(p.y - sy * ps, R, H - R);
+          q.x = cl(q.x + sx * ps, R, W - R); q.y = cl(q.y + sy * ps, R, H - R);
         }
       }
     }
@@ -281,7 +356,7 @@
         if (c.dead && !c.rip) {
           c.rip = true;
           ev.push({ t: 'kill', i: c.i, x: c.x, y: c.y });
-          if (c.i > 0) m.kills++;
+          if (c.i > 0 && !c.isMinion) m.kills++;
         }
       });
       if (m.p[0].dead) { m.phase = 'roundend'; m.t = 1.2; }
@@ -295,7 +370,7 @@
           ev.push({ t: 'kill', i: c.i, x: c.x, y: c.y });
         }
       });
-      var alive = m.p.filter(function (q) { return !q.dead; });
+      var alive = m.p.filter(function (q) { return !q.dead && !q.isMinion; });
       if (alive.length <= 1) {
         m.phase = 'roundend'; m.t = 2.0;
         m.winner = alive.length === 1 ? alive[0].i : -1;
@@ -310,8 +385,8 @@
           ev.push({ t: 'kill', i: c.i, x: c.x, y: c.y });
         }
       });
-      var t0Alive = m.p.some(function (c) { return c.team === 0 && !c.dead; });
-      var t1Alive = m.p.some(function (c) { return c.team === 1 && !c.dead; });
+      var t0Alive = m.p.some(function (c) { return c.team === 0 && !c.dead && !c.isMinion; });
+      var t1Alive = m.p.some(function (c) { return c.team === 1 && !c.dead && !c.isMinion; });
       if (!t0Alive || !t1Alive) {
         m.phase = 'roundend'; m.t = 1.7;
         if (t0Alive && !t1Alive) m.score[0]++;
@@ -324,7 +399,7 @@
     if (d0 || d1) {
       m.phase = 'roundend'; m.t = 1.7;
       if (!(d0 && d1)) m.score[d0 ? 1 : 0]++;
-      m.p.forEach(function (c) { if (c.dead) ev.push({ t: 'kill', i: c.i, x: c.x, y: c.y }); });
+      m.p.forEach(function (c) { if (c.dead && !c.rip) { c.rip = true; ev.push({ t: 'kill', i: c.i, x: c.x, y: c.y }); } });
     }
   }
 
@@ -348,7 +423,7 @@
   var api = {
     W: W, H: H, R: R, PAR: PAR, A0: A0, A1: A1, REACH: REACH, CHARGE_T: CHARGE_T,
     SWING_CD: SWING_CD, BLINK_D: BLINK_D, BLINK_WIND: BLINK_WIND, SHRINE_R: SHRINE_R, EXTRACT_TIME: EXTRACT_TIME,
-    create: create, create2v2: create2v2, createEndless: createEndless, createFFA: createFFA, tick: tick
+    create: create, create2v2: create2v2, createEndless: createEndless, createFFA: createFFA, spawnBodyguard: spawnBodyguard, tick: tick
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Shared = api;
