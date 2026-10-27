@@ -12,12 +12,176 @@
   };
   var cv = $('c'), ctx = cv.getContext('2d');
   var COL = ['#191514', '#c9331f'], GOLD = '#b8891f', PAPER = '#e8dfc9', INK = '#191514';
-  var RANKS = [
-    { n: 'Bronze', min: 0, next: 501, c: '#cd7f32' },
-    { n: 'Silver', min: 501, next: 1001, c: '#b8b3a8' },
-    { n: 'Gold', min: 1001, next: 1001, c: '#d9a526' }
+  var RANKS = [ // Bronze 0-499, Silver 500-999, Gold 1000-1499, Platinum 1500-1999, Diamond 2000+
+    { n: 'Bronze', min: 0, next: 500, c: '#cd7f32' },
+    { n: 'Silver', min: 500, next: 1000, c: '#b8b3a8' },
+    { n: 'Gold', min: 1000, next: 1500, c: '#d9a526' },
+    { n: 'Platinum', min: 1500, next: 2000, c: '#8fbfb4' },
+    { n: 'Diamond', min: 2000, next: 2000, c: '#f2ece0' }
   ];
   var RANK_NAMES = RANKS.map(function (r) { return r.n; });
+
+  // ---------- looks: rank-unlocked cosmetics ----------
+  // The fighter itself is always a bare filled circle. A look only ADDS thin strokes on top of it; 'none' adds nothing.
+  var BONE = '#efe6d2';
+  var LOOKS = [
+    { id: 'none', name: 'Plain', need: 'Bronze', desc: 'The bare circle, nothing added.' },
+    { id: 'bronze', name: 'Scarred', need: 'Bronze', desc: 'A slash scar across the circle and a notch in the blade.' },
+    { id: 'silver', name: 'Wanderer', need: 'Silver', desc: 'A straw cone hat and a silver tint on your dash trail.' },
+    { id: 'gold', name: 'Veteran', need: 'Gold', desc: 'Two battle scars and a gold edge on the blade.' },
+    { id: 'platinum', name: 'Ronin', need: 'Platinum', desc: 'A wide-brimmed ronin hat and a chest plate.' },
+    { id: 'diamond', name: 'Champion', need: 'Diamond', desc: 'Crossed scars, a crown and aura, and diamond dash sparks.' }
+  ];
+  var TRAIL_TINT = { silver: '#d6d2c8', gold: '#e5b842', platinum: '#c9331f' };
+  var looks = ['none', 'none']; // the look worn by each fighter in the current match
+  function hexA(h, a) { return 'rgba(' + parseInt(h.slice(1, 3), 16) + ',' + parseInt(h.slice(3, 5), 16) + ',' + parseInt(h.slice(5, 7), 16) + ',' + a + ')'; }
+  function strokePath(g, pts, px, py, col, w) { // points are in units of the circle radius
+    g.beginPath();
+    for (var i = 0; i < pts.length; i++) { var x = px + pts[i][0] * R, y = py + pts[i][1] * R; if (i) g.lineTo(x, y); else g.moveTo(x, y); }
+    g.strokeStyle = col; g.lineWidth = w; g.lineCap = 'round'; g.lineJoin = 'round'; g.stroke();
+  }
+  function ringPoly(g, px, py, n, r0, r1, rot) { // regular n-gon when r0 === r1, otherwise a spiky ring of n points
+    var m = r0 === r1 ? n : n * 2, i;
+    g.beginPath();
+    for (i = 0; i < m; i++) {
+      var a = rot + i * 6.283 / m, r = r0 === r1 ? r0 : (i % 2 ? r0 : r1);
+      if (i) g.lineTo(px + Math.cos(a) * r, py + Math.sin(a) * r); else g.moveTo(px + Math.cos(a) * r, py + Math.sin(a) * r);
+    }
+    g.closePath();
+  }
+  function lookBelow(g, look, px, py, c, now) { // behind the circle: only the Diamond aura
+    if (look !== 'diamond') return;
+    var pu = 0.5 + 0.5 * Math.sin(now / 420);
+    g.strokeStyle = c; g.lineWidth = 2;
+    g.globalAlpha = 0.2 + 0.2 * pu; g.beginPath(); g.arc(px, py, R + 9 + pu * 3, 0, 7); g.stroke();
+    g.globalAlpha = 0.1 + 0.1 * pu; g.beginPath(); g.arc(px, py, R + 15 + pu * 4, 0, 7); g.stroke();
+    g.globalAlpha = 1;
+  }
+  function lookAbove(g, look, px, py) { // over the circle: scars, hats and plates, all drawn as thin strokes
+    var i, a;
+    if (look === 'bronze') { // single slash scar
+      strokePath(g, [[-0.8, -0.6], [-0.2, -0.12], [0.08, 0.1], [0.78, 0.62]], px, py, BONE, 1.7);
+    } else if (look === 'silver') { // Wanderer: sharpened conical sedge hat with inner ring & woven radial spokes
+      ringPoly(g, px, py, 12, R + 4, R + 4, 0.26);
+      g.strokeStyle = INK; g.lineWidth = 2.4; g.lineJoin = 'round'; g.stroke();
+      ringPoly(g, px, py, 12, R * 0.55, R * 0.55, 0.26);
+      g.strokeStyle = '#9e9788'; g.lineWidth = 1.3; g.stroke();
+      for (i = 0; i < 12; i++) {
+        a = 0.26 + i * (6.283 / 12);
+        strokePath(g, [[Math.cos(a) * 0.1, Math.sin(a) * 0.1], [Math.cos(a) * (1 + 4 / R), Math.sin(a) * (1 + 4 / R)]], px, py, BONE, 1.1);
+      }
+      g.fillStyle = INK; g.beginPath(); g.arc(px, py, 2.2, 0, 7); g.fill();
+    } else if (look === 'gold') { // Veteran: jagged double battle scars with cross-notches and reinforced crest
+      strokePath(g, [[-0.95, -0.3], [-0.3, 0.1], [0.1, 0.35], [0.75, 0.85]], px, py, BONE, 2.2);
+      strokePath(g, [[-0.6, -0.85], [-0.05, -0.3], [0.45, 0.0], [0.95, 0.4]], px, py, BONE, 2.2);
+      strokePath(g, [[-0.45, 0.0], [-0.2, 0.22]], px, py, GOLD, 1.4);
+      strokePath(g, [[0.15, -0.22], [0.35, 0.0]], px, py, GOLD, 1.4);
+      g.strokeStyle = GOLD; g.lineWidth = 1.8;
+      g.beginPath();
+      g.arc(px, py, R + 2.5, -2.4, -0.74);
+      g.stroke();
+      g.beginPath();
+      g.arc(px, py, R + 2.5, 0.74, 2.4);
+      g.stroke();
+    } else if (look === 'platinum') { // Ronin: wide flared lacquer hat, sharp cord cross-ties and hexagonal segmented chestplate
+      g.strokeStyle = INK; g.lineWidth = 3.2; g.beginPath(); g.arc(px, py, R + 9, 0, 7); g.stroke();
+      g.strokeStyle = '#c9331f'; g.lineWidth = 1.4; g.beginPath(); g.arc(px, py, R + 7.5, 0, 7); g.stroke();
+      for (i = 0; i < 16; i++) {
+        a = i * (6.283 / 16);
+        strokePath(g, [[Math.cos(a) * (1 + 2 / R), Math.sin(a) * (1 + 2 / R)], [Math.cos(a) * (1 + 9 / R), Math.sin(a) * (1 + 9 / R)]], px, py, hexA(BONE, 0.8), 0.9);
+      }
+      strokePath(g, [[-0.5, -0.5], [0.5, 0.5]], px, py, '#c9331f', 1.4);
+      strokePath(g, [[0.5, -0.5], [-0.5, 0.5]], px, py, '#c9331f', 1.4);
+      ringPoly(g, px, py, 6, R * 0.65, R * 0.65, 0);
+      g.strokeStyle = BONE; g.lineWidth = 1.6; g.lineJoin = 'miter'; g.stroke();
+      ringPoly(g, px, py, 6, R * 0.35, R * 0.35, 0);
+      g.strokeStyle = INK; g.lineWidth = 1.2; g.stroke();
+    } else if (look === 'diamond') { // crossed scars and a spiked crown ring (Champion: unchanged)
+      strokePath(g, [[-0.8, -0.75], [-0.1, -0.05], [0.1, 0.1], [0.8, 0.78]], px, py, BONE, 1.7);
+      strokePath(g, [[0.78, -0.8], [0.1, -0.1], [-0.1, 0.1], [-0.8, 0.75]], px, py, BONE, 1.7);
+      ringPoly(g, px, py, 8, R + 2, R + 8, -1.57); g.strokeStyle = INK; g.lineWidth = 2.4; g.lineJoin = 'miter'; g.stroke();
+      g.strokeStyle = GOLD; g.lineWidth = 1; g.stroke();
+    }
+  }
+  // The blade. Ink-tipped: the player's colour pools at the tip and has faded to nothing by the middle of the blade.
+  function drawBlade(g, look, px, py, fa, c, dim) {
+    var ca = Math.cos(fa), sa = Math.sin(fa);
+    var x0 = px + ca * R * 0.4, y0 = py + sa * R * 0.4, x1 = px + ca * (R + 14), y1 = py + sa * (R + 14);
+    g.globalAlpha = dim ? 0.45 : 1; g.lineCap = 'round';
+    g.beginPath(); g.moveTo(x0, y0); g.lineTo(x1, y1);
+    if (look === 'gold') { g.strokeStyle = GOLD; g.lineWidth = 9.5; g.stroke(); }
+    else if (look === 'silver') { g.strokeStyle = '#d6d2c8'; g.lineWidth = 8.5; g.stroke(); }
+    else if (look === 'platinum') { g.strokeStyle = '#c9331f'; g.lineWidth = 9.0; g.stroke(); }
+    g.strokeStyle = INK; g.lineWidth = 7; g.stroke();
+    g.strokeStyle = BONE; g.lineWidth = 3; g.stroke();
+    var gr = g.createLinearGradient(x1, y1, x0, y0); // from the tip back towards the hilt
+    gr.addColorStop(0, hexA(c, 0.95)); gr.addColorStop(0.5, hexA(c, 0)); gr.addColorStop(1, hexA(c, 0));
+    g.strokeStyle = gr; g.lineWidth = 3.2; g.stroke();
+    g.fillStyle = hexA(c, 0.9); g.beginPath(); g.arc(x1 - ca * 0.6, y1 - sa * 0.6, 2.6, 0, 7); g.fill(); // the little blot at the very tip
+    if (look === 'bronze') { // a small notch bitten out of the blade edge
+      var nx = -sa, ny = ca, tx = x0 + (x1 - x0) * 0.62, ty = y0 + (y1 - y0) * 0.62;
+      g.fillStyle = PAPER; g.beginPath();
+      g.moveTo(tx - ca * 2 + nx * 4.5, ty - sa * 2 + ny * 4.5); g.lineTo(tx + ca * 2 + nx * 4.5, ty + sa * 2 + ny * 4.5); g.lineTo(tx + nx * 0.7, ty + ny * 0.7);
+      g.closePath(); g.fill();
+    } else if (look === 'silver') {
+      var nx1 = -sa, ny1 = ca, tx1 = x0 + (x1 - x0) * 0.8, ty1 = y0 + (y1 - y0) * 0.8;
+      g.strokeStyle = '#f2ece0'; g.lineWidth = 1.5; g.beginPath();
+      g.moveTo(tx1 + nx1 * 3, ty1 + ny1 * 3); g.lineTo(x1 + nx1 * 1.5, y1 + ny1 * 1.5); g.stroke();
+    } else if (look === 'gold') {
+      var nx2 = -sa, ny2 = ca, mx = (x0 + x1) * 0.5, my = (y0 + y1) * 0.5;
+      g.strokeStyle = GOLD; g.lineWidth = 2.2; g.beginPath();
+      g.moveTo(mx - ca * 3 + nx2 * 3.5, my - sa * 3 + ny2 * 3.5);
+      g.lineTo(mx + ca * 3 + nx2 * 3.5, my + sa * 3 + ny2 * 3.5);
+      g.stroke();
+    } else if (look === 'platinum') {
+      var nx3 = -sa, ny3 = ca;
+      g.fillStyle = '#191514'; g.beginPath();
+      g.arc(x0 + ca * 4, y0 + sa * 4, 3.2, 0, 7); g.fill();
+      g.strokeStyle = '#c9331f'; g.lineWidth = 1.2;
+      g.beginPath();
+      g.moveTo(x0 + nx3 * 3.5, y0 + ny3 * 3.5);
+      g.lineTo(x0 - nx3 * 3.5, y0 - ny3 * 3.5);
+      g.stroke();
+    }
+    g.globalAlpha = 1;
+  }
+  function drawFighter(g, look, px, py, c, fa, now) { // a whole fighter, used by the look picker previews
+    lookBelow(g, look, px, py, c, now);
+    g.fillStyle = c; g.beginPath(); g.arc(px, py, R, 0, 7); g.fill();
+    lookAbove(g, look, px, py);
+    drawBlade(g, look, px, py, fa, c, false);
+  }
+  function sparks(x1, y1, x2, y2, c) { // Diamond dash particles: little diamonds strewn along the dash path
+    for (var i = 0; i < 18; i++) {
+      var t = Math.random(), a = Math.random() * 6.283, sp = 20 + Math.random() * 70;
+      fx.push({ k: 'p', dm: true, x: x1 + (x2 - x1) * t, y: y1 + (y2 - y1) * t, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, t: 0.55 + Math.random() * 0.5, c: i % 3 ? c : GOLD });
+    }
+  }
+  function dashWanderer(x1, y1, x2, y2, c) { // Wanderer dash: wind ribbons and straw leaves
+    var dx = x2 - x1, dy = y2 - y1, len = Math.hypot(dx, dy) || 1, nx = -dy / len, ny = dx / len;
+    for (var i = 0; i < 14; i++) {
+      var t = Math.random(), wOff = (Math.random() - 0.5) * 18;
+      var px = x1 + dx * t + nx * wOff, py = y1 + dy * t + ny * wOff;
+      var a = Math.atan2(dy, dx) + (Math.random() - 0.5) * 0.8;
+      var sp = 30 + Math.random() * 80;
+      fx.push({ k: 'p', leaf: true, x: px, y: py, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, t: 0.45 + Math.random() * 0.4, c: i % 2 ? '#d6d2c8' : '#8e8674' });
+    }
+  }
+  function dashVeteran(x1, y1, x2, y2, c) { // Veteran dash: molten spark trails and friction grit
+    var dx = x2 - x1, dy = y2 - y1;
+    for (var i = 0; i < 16; i++) {
+      var t = Math.random(), sp = 50 + Math.random() * 110, a = Math.random() * 6.283;
+      fx.push({ k: 'p', spark: true, x: x1 + dx * t, y: y1 + dy * t, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, t: 0.35 + Math.random() * 0.35, c: i % 3 === 0 ? '#ffffff' : (i % 2 === 0 ? GOLD : '#d9a526') });
+    }
+  }
+  function dashRonin(x1, y1, x2, y2, c) { // Ronin dash: crimson stroke cuts and blood-ink flickers
+    var dx = x2 - x1, dy = y2 - y1, len = Math.hypot(dx, dy) || 1, nx = -dy / len, ny = dx / len;
+    for (var i = 0; i < 15; i++) {
+      var t = Math.random(), sgn = Math.random() < 0.5 ? 1 : -1, off = sgn * (4 + Math.random() * 16);
+      var px = x1 + dx * t + nx * off, py = y1 + dy * t + ny * off;
+      fx.push({ k: 'p', roninCut: true, x: px, y: py, vx: nx * sgn * (40 + Math.random() * 60), vy: ny * sgn * (40 + Math.random() * 60), t: 0.38 + Math.random() * 0.32, c: i % 3 ? '#c9331f' : INK });
+    }
+  }
   var CTRL = [
     { u: 'w', d: 's', l: 'a', r: 'd', sw: 'f', pa: 'g', bl: 'h' },
     { u: 'ArrowUp', d: 'ArrowDown', l: 'ArrowLeft', r: 'ArrowRight', sw: ',', pa: '.', bl: '/' }
@@ -59,6 +223,7 @@
     $('card').style.display = prof ? '' : 'none';
     $('rank').disabled = !prof;
     $('boardbtn').hidden = !sock;
+    $('lookbtn').hidden = !prof;
     $('savebtn').hidden = !prof;
     $('logout').hidden = !prof;
     $('local').hidden = touch; // two players on one keyboard needs a keyboard
@@ -179,7 +344,7 @@
 
   // "Save Data": asks the server to write this account to disk. The server checks the live session and the
   // session token; rating and unlocks are the server's own numbers, only the equipped cosmetics come from here.
-  function readEquipped() { try { return JSON.parse(localStorage.getItem('bb_equipped') || '{}') || {}; } catch (e) { return {}; } }
+  function readEquipped() { return prof && prof.equipped ? prof.equipped : {}; }
   $('savebtn').onclick = function () {
     var b = $('savebtn'), settled = false;
     if (b.disabled) return;
@@ -204,6 +369,42 @@
     sock.emit('top', function (rows) { renderBoard(rows || []); show('board'); });
   };
   $('boardback').onclick = showLobby;
+
+  // ---------- the look picker ----------
+  $('lookbtn').onclick = function () { renderLooks(); show('wardrobe'); };
+  $('lookback').onclick = showLobby;
+  function renderLooks() {
+    var grid = $('lookgrid'), unlocked = (prof && prof.unlocked) || [], cur = prof && prof.equipped && prof.equipped.look;
+    while (grid.firstChild) grid.removeChild(grid.firstChild);
+    LOOKS.forEach(function (L) {
+      var open = unlocked.indexOf(L.id) >= 0;
+      var b = document.createElement('button'), pv = document.createElement('canvas'), nm = document.createElement('span'), sm = document.createElement('small');
+      b.className = 'look' + (L.id === cur ? ' sel' : '');
+      b.disabled = !open;
+      b.title = open ? L.desc : 'Reach ' + L.need + ' to unlock this look';
+      pv.width = 72; pv.height = 72;
+      var g = pv.getContext('2d');
+      g.fillStyle = PAPER; g.fillRect(0, 0, 72, 72);
+      g.globalAlpha = open ? 1 : 0.3;
+      g.save(); g.translate(36, 38); g.scale(1.3, 1.3);
+      drawFighter(g, L.id, 0, 0, COL[0], -0.6, performance.now());
+      g.restore(); g.globalAlpha = 1;
+      nm.textContent = L.name;
+      sm.textContent = L.id === cur ? 'Equipped' : open ? 'Unlocked' : 'Reach ' + L.need;
+      b.appendChild(pv); b.appendChild(nm); b.appendChild(sm);
+      b.onclick = function () { equipLook(L.id); };
+      grid.appendChild(b);
+    });
+    var now = LOOKS.filter(function (L) { return L.id === cur; })[0];
+    $('lookinfo').textContent = now ? now.name + ': ' + now.desc : '';
+  }
+  function equipLook(id) {
+    if (!sock || !prof) return;
+    sock.emit('equip', { look: id }, function (r) {
+      if (r && r.ok) { setProfile(r.profile); renderLooks(); }
+      else toast('Could not equip that look', true);
+    });
+  }
   $('mute').onclick = function () { Sfx.toggle(); syncMute(); };
   function syncMute() { $('mute').textContent = Sfx.isOn() ? 'Sound on' : 'Sound off'; }
   if (typeof Sfx !== 'undefined') syncMute();
@@ -264,6 +465,7 @@
   }
   function startLocal(k) {
     lastKind = k; mode = k; vs = null; me = 0;
+    looks = [prof && prof.equipped && prof.equipped.look || 'none', 'none']; // offline without an account: the plain circle
     M = k === 'endless' ? S.createEndless() : S.create(4);
     names = k === 'endless' ? ['You', 'Bots'] : ['P1', k === 'bot' ? 'Bot' : 'P2'];
     beginView();
@@ -286,6 +488,7 @@
       clearInterval(qI);
       mode = 'online'; lastKind = 'online'; me = d.you; names = d.names; M = null;
       vs = { ranks: d.ranks, mmrs: d.mmrs };
+      looks = d.looks || ['none', 'none'];
       beginView();
       $('rnd').textContent = 'Ranked';
     });
@@ -301,7 +504,10 @@
       var why = d.forfeit ? (d.quit === d.you ? 'You forfeited. ' : 'Opponent forfeited. ') : '';
       var line = d.profile.rank + ', ' + d.profile.mmr + ' MMR';
       var from = RANK_NAMES.indexOf(d.oldRank || oldRank), to = RANK_NAMES.indexOf(d.profile.rank);
-      if (from >= 0 && to > from) line = 'Promoted to ' + d.profile.rank + '!';
+      if (from >= 0 && to > from) {
+        var gained = LOOKS.filter(function (L) { return L.id === d.profile.rank.toLowerCase(); })[0];
+        line = 'Promoted to ' + d.profile.rank + '!' + (gained ? ' New look: ' + gained.name : '');
+      }
       else if (from >= 0 && to < from) line = 'Dropped to ' + d.profile.rank;
       else if (d.profile.streak >= 3) line += '  (' + d.profile.streak + ' wins in a row)';
       result(won ? 'Victory' : 'Defeat', why + names[0] + ' ' + d.score[0] + ' - ' + d.score[1] + ' ' + names[1],
@@ -411,7 +617,12 @@
       else if (e.t === 'shine') snd('shine', e.x);
       else if (e.t === 'blink') {
         c = COL[e.i > 0 ? 1 : 0];
-        fx.push({ k: 'l', x1: e.x1, y1: e.y1, x2: e.x2, y2: e.y2, t: 0.4, c: c });
+        var lk = looks[e.i] || 'none';
+        fx.push({ k: 'l', x1: e.x1, y1: e.y1, x2: e.x2, y2: e.y2, t: 0.4, c: c, tint: TRAIL_TINT[lk] });
+        if (lk === 'diamond') sparks(e.x1, e.y1, e.x2, e.y2, c);
+        else if (lk === 'silver') dashWanderer(e.x1, e.y1, e.x2, e.y2, c);
+        else if (lk === 'gold') dashVeteran(e.x1, e.y1, e.x2, e.y2, c);
+        else if (lk === 'platinum') dashRonin(e.x1, e.y1, e.x2, e.y2, c);
         fx.push({ k: 'g', x: e.x1, y: e.y1, t: 0.35, T: 0.35, c: c });
         streak(e.x1, e.y1, e.x2, e.y2, c);
         snd('blink', e.x1);
@@ -571,7 +782,13 @@
   function fxStep(dt) {
     for (var i = fx.length - 1; i >= 0; i--) {
       var f = fx[i]; f.t -= dt;
-      if (f.k === 'p') { f.x += f.vx * dt; f.y += f.vy * dt; f.vx *= 0.94; f.vy *= 0.94; }
+      if (f.k === 'p') {
+        f.x += f.vx * dt; f.y += f.vy * dt;
+        if (f.leaf) { f.vx *= 0.91; f.vy *= 0.91; }
+        else if (f.spark) { f.vx *= 0.88; f.vy *= 0.88; }
+        else if (f.roninCut) { f.vx *= 0.85; f.vy *= 0.85; }
+        else { f.vx *= 0.94; f.vy *= 0.94; }
+      }
       else if (f.k === 'd') {
         var fr = Math.pow(0.03, dt);
         f.vx *= fr; f.vy *= fr; f.va *= fr; f.a += f.va * dt;
@@ -613,7 +830,9 @@
       var a = f.T ? Math.max(0, f.t / f.T) : 1;
       if (f.k === 'l') {
         ctx.globalAlpha = Math.max(0, f.t / 0.4); ctx.strokeStyle = f.c; ctx.lineWidth = 8; ctx.lineCap = 'round';
-        ctx.beginPath(); ctx.moveTo(f.x1, f.y1); ctx.lineTo(f.x2, f.y2); ctx.stroke(); ctx.globalAlpha = 1;
+        ctx.beginPath(); ctx.moveTo(f.x1, f.y1); ctx.lineTo(f.x2, f.y2); ctx.stroke();
+        if (f.tint) { ctx.strokeStyle = f.tint; ctx.lineWidth = 3; ctx.stroke(); }
+        ctx.globalAlpha = 1;
       } else if (f.k === 'r') {
         ctx.globalAlpha = a; ctx.strokeStyle = f.c; ctx.lineWidth = f.w * a + 1;
         ctx.beginPath(); ctx.arc(f.x, f.y, f.r0 + (f.r1 - f.r0) * (1 - a), 0, 7); ctx.stroke(); ctx.globalAlpha = 1;
@@ -623,16 +842,49 @@
       } else if (f.k === 'g') {
         ctx.globalAlpha = 0.4 * a; ctx.fillStyle = f.c; ctx.beginPath(); ctx.arc(f.x, f.y, R, 0, 7); ctx.fill(); ctx.globalAlpha = 1;
       } else {
-        ctx.globalAlpha = Math.min(1, f.t * 2); ctx.fillStyle = f.c; ctx.fillRect(f.x - 2, f.y - 2, 4, 4); ctx.globalAlpha = 1;
+        ctx.globalAlpha = Math.min(1, f.t * 2); ctx.fillStyle = f.c;
+        if (f.dm) {
+          ctx.beginPath(); ctx.moveTo(f.x, f.y - 4); ctx.lineTo(f.x + 3, f.y); ctx.lineTo(f.x, f.y + 4); ctx.lineTo(f.x - 3, f.y); ctx.closePath(); ctx.fill();
+        } else if (f.leaf) {
+          ctx.save(); ctx.translate(f.x, f.y); ctx.rotate(f.vx * 0.05);
+          ctx.beginPath(); ctx.ellipse(0, 0, 4.5, 2, 0, 0, 6.283); ctx.fill();
+          ctx.restore();
+        } else if (f.spark) {
+          ctx.beginPath(); ctx.arc(f.x, f.y, 1.8, 0, 6.283); ctx.fill();
+        } else if (f.roninCut) {
+          ctx.save(); ctx.translate(f.x, f.y);
+          ctx.beginPath(); ctx.moveTo(-3, -1.5); ctx.lineTo(3, 1.5); ctx.lineWidth = 2; ctx.strokeStyle = f.c; ctx.stroke();
+          ctx.restore();
+        } else {
+          ctx.fillRect(f.x - 2, f.y - 2, 4, 4);
+        }
+        ctx.globalAlpha = 1;
       }
     });
     M.p.forEach(function (p, i) {
       if (p.dead) return;
       var px = disp[i] ? disp[i].x : p.x, py = disp[i] ? disp[i].y : p.y, c = COL[i > 0 ? 1 : 0];
+      var look = looks[i] || 'none';
       if (p.sw >= 0) {
         var act = p.sw >= A0 && p.sw < A1;
         ctx.globalAlpha = act ? 0.8 : 0.18; ctx.fillStyle = c;
         ctx.beginPath(); ctx.moveTo(px, py); ctx.arc(px, py, S.REACH, p.fa - 1.05, p.fa + 1.05); ctx.closePath(); ctx.fill();
+        if (act) { // skin-specific slash accents
+          if (look === 'silver') {
+            ctx.strokeStyle = '#d6d2c8'; ctx.lineWidth = 3.5; ctx.beginPath();
+            ctx.arc(px, py, S.REACH, p.fa - 1.0, p.fa + 1.0); ctx.stroke();
+          } else if (look === 'gold') {
+            ctx.strokeStyle = GOLD; ctx.lineWidth = 4.5; ctx.beginPath();
+            ctx.arc(px, py, S.REACH, p.fa - 0.95, p.fa + 0.95); ctx.stroke();
+            ctx.strokeStyle = BONE; ctx.lineWidth = 1.8; ctx.beginPath();
+            ctx.arc(px, py, S.REACH - 4, p.fa - 0.7, p.fa + 0.7); ctx.stroke();
+          } else if (look === 'platinum') {
+            ctx.strokeStyle = '#c9331f'; ctx.lineWidth = 4; ctx.beginPath();
+            ctx.arc(px, py, S.REACH, p.fa - 1.05, p.fa + 1.05); ctx.stroke();
+            ctx.strokeStyle = INK; ctx.lineWidth = 2; ctx.beginPath();
+            ctx.arc(px, py, S.REACH - 3, p.fa - 1.05, p.fa + 1.05); ctx.stroke();
+          }
+        }
         ctx.globalAlpha = 1;
       }
       if (p.pa >= 0) {
@@ -640,6 +892,7 @@
         ctx.strokeStyle = on ? GOLD : 'rgba(184,137,31,.3)'; ctx.lineWidth = on ? 4 : 2;
         ctx.beginPath(); ctx.arc(px, py, R + 9 + (on ? p.pa * 20 : 0), 0, 7); ctx.stroke();
       }
+      lookBelow(ctx, look, px, py, c, now);
       var shine = p.bw > 0 ? 1 - p.bw / S.BLINK_WIND : -1; // 0..1 while a dash is charging (0.1s)
       ctx.shadowBlur = 0; ctx.fillStyle = p.st > 0 ? '#9c9484' : c;
       ctx.beginPath(); ctx.arc(px, py, R, 0, 7); ctx.fill();
@@ -651,12 +904,8 @@
         ctx.fillStyle = 'rgba(255,255,255,' + (0.2 + 0.65 * shine).toFixed(2) + ')';
         ctx.beginPath(); ctx.arc(px - R * 0.32, py - R * 0.36, R * 0.2, 0, 7); ctx.fill();
       }
-      ctx.globalAlpha = p.sc > 0 ? 0.45 : 1; // blade dims while the sword is on cooldown
-      ctx.strokeStyle = INK; ctx.lineWidth = 7; ctx.lineCap = 'round'; ctx.beginPath();
-      ctx.moveTo(px + Math.cos(p.fa) * R * 0.4, py + Math.sin(p.fa) * R * 0.4);
-      ctx.lineTo(px + Math.cos(p.fa) * (R + 14), py + Math.sin(p.fa) * (R + 14)); ctx.stroke();
-      ctx.strokeStyle = '#efe6d2'; ctx.lineWidth = 3; ctx.stroke();
-      ctx.globalAlpha = 1;
+      lookAbove(ctx, look, px, py);
+      drawBlade(ctx, look, px, py, p.fa, c, p.sc > 0); // the blade dims while the sword is on cooldown
       if (p.st > 0) {
         ctx.strokeStyle = GOLD; ctx.lineWidth = 2;
         for (var k = 0; k < 3; k++) { var a = now / 120 + k * 2.1; ctx.beginPath(); ctx.arc(px + Math.cos(a) * 15, py - R - 8 + Math.sin(a) * 4, 3, 0, 7); ctx.stroke(); }
