@@ -6,9 +6,12 @@
   var SHRINE_R = 34, EXTRACT_TIME = 3.0;
 
   function mk(i, x, fa, y, team) {
-    return { i: i, x: x, y: y === undefined ? H / 2 : y, fa: fa, ch: 3, rc: 0, st: 0, sw: -1, hs: [],
-             pa: -1, bc: 0, sc: 0, bw: 0, bdx: 0, bdy: 0, dead: false, ix: 0, iy: 0, spd: 200,
-             team: team !== undefined ? team : i, extract: 0, points: 0, kills: 0, parries: 0, blinks: 0 };
+    return {
+      i: i, x: x, y: y === undefined ? H / 2 : y, fa: fa, ch: 3, rc: 0, st: 0, sw: -1, hs: [],
+      pa: -1, bc: 0, sc: 0, bw: 0, bdx: 0, bdy: 0, dead: false, ix: 0, iy: 0, spd: 200,
+      team: team !== undefined ? team : i, extract: 0, points: 0, kills: 0, parries: 0, blinks: 0,
+      god: false, noCd: false
+    };
   }
   function cl(v, a, b) { return Math.max(a, Math.min(b, v)); }
   function norm(a) { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI) a += 2 * Math.PI; return a; }
@@ -51,12 +54,14 @@
   }
 
   function createFFA(players) {
-    var m = { ffa: true, mode: 'ffa', p: [], shrines: [
-      { id: 0, x: W / 4, y: H / 4, r: SHRINE_R },
-      { id: 1, x: (3 * W) / 4, y: H / 4, r: SHRINE_R },
-      { id: 2, x: W / 4, y: (3 * H) / 4, r: SHRINE_R },
-      { id: 3, x: (3 * W) / 4, y: (3 * H) / 4, r: SHRINE_R }
-    ], phase: 'fight', round: 1, score: [0, 0], win: 1 };
+    var m = {
+      ffa: true, mode: 'ffa', p: [], shrines: [
+        { id: 0, x: W / 4, y: H / 4, r: SHRINE_R },
+        { id: 1, x: (3 * W) / 4, y: H / 4, r: SHRINE_R },
+        { id: 2, x: W / 4, y: (3 * H) / 4, r: SHRINE_R },
+        { id: 3, x: (3 * W) / 4, y: (3 * H) / 4, r: SHRINE_R }
+      ], phase: 'fight', round: 1, score: [0, 0], win: 1
+    };
     (players || []).forEach(function (pl, i) {
       var a = (i * 6.283) / Math.max(1, players.length);
       var rx = W / 2 + Math.cos(a) * (W * 0.35);
@@ -83,14 +88,20 @@
   }
 
   function resolve(a, d, ev, blink) {
+    if (d.god) {
+      ev.push({ t: 'god_block', x: d.x, y: d.y });
+      return;
+    }
     if (parrying(d)) {
       if (blink) {
-        a.dead = true;
+        if (!a.god) a.dead = true;
         d.points = (d.points || 0) + 50;
         d.blinks = (d.blinks || 0) + 1;
         ev.push({ t: 'intercept', by: d.i, victim: a.i, x: d.x, y: d.y });
       } else {
-        a.st = 1.1; a.sw = -1; a.bw = 0;
+        if (!a.god) {
+          a.st = 1.1; a.sw = -1; a.bw = 0;
+        }
         d.points = (d.points || 0) + 30;
         d.parries = (d.parries || 0) + 1;
       }
@@ -105,21 +116,23 @@
 
   function act(m, i, k, ev) {
     var p = m.p[i];
-    if (!p || p.dead || p.st > 0) return;
-    if (k === 'sw' && p.sw < 0 && p.pa < 0 && p.bc <= 0 && p.sc <= 0 && p.bw <= 0) {
+    if (!p || p.dead || (!p.noCd && p.st > 0)) return;
+    if (k === 'sw' && (p.noCd || (p.sw < 0 && p.pa < 0 && p.bc <= 0 && p.sc <= 0 && p.bw <= 0))) {
       p.sw = 0; p.hs = []; p.extract = 0;
       ev.push({ t: 'swing', i: i, x: p.x, y: p.y });
     }
-    else if (k === 'pa' && p.sw < 0 && p.pa < 0 && p.bc <= 0 && p.bw <= 0) {
+    else if (k === 'pa' && (p.noCd || (p.sw < 0 && p.pa < 0 && p.bc <= 0 && p.bw <= 0))) {
       p.pa = 0; p.extract = 0;
       ev.push({ t: 'raise', i: i, x: p.x, y: p.y });
     }
-    else if (k === 'bl' && p.ch > 0 && p.bc <= 0 && p.pa < 0 && p.sw < 0 && p.bw <= 0) {
+    else if (k === 'bl' && (p.noCd || (p.ch > 0 && p.bc <= 0 && p.pa < 0 && p.sw < 0 && p.bw <= 0))) {
       var dx = p.ix, dy = p.iy;
       if (!dx && !dy) { dx = Math.cos(p.fa); dy = Math.sin(p.fa); }
       var l = Math.hypot(dx, dy) || 1;
       p.bdx = dx / l; p.bdy = dy / l; p.fa = Math.atan2(p.bdy, p.bdx);
-      p.bw = BLINK_WIND; p.ch--; p.extract = 0;
+      p.bw = BLINK_WIND;
+      if (!p.noCd) p.ch--;
+      p.extract = 0;
       ev.push({ t: 'shine', i: i, x: p.x, y: p.y });
     }
   }
@@ -133,7 +146,7 @@
     for (var j = 0; j < fs.length && !p.dead; j++) {
       if (!fs[j].dead && segd(p.x, p.y, nx, ny, fs[j].x, fs[j].y) < R + 8) resolve(p, fs[j], ev, true);
     }
-    p.x = nx; p.y = ny; p.bc = BLINK_REC; p.sw = -1;
+    p.x = nx; p.y = ny; p.bc = p.noCd ? 0 : BLINK_REC; p.sw = -1;
   }
 
   function botAI(m, b, dt) {
@@ -180,12 +193,16 @@
     var n = m.p.length, i, j, p, o, q, u, l, fs;
     for (i = 0; i < n; i++) {
       p = m.p[i]; if (!p || p.dead) continue;
-      if (p.ch < 3) { p.rc += dt; if (p.rc >= CHARGE_T) { p.ch++; p.rc = 0; } }
-      if (p.st > 0) p.st -= dt;
-      if (p.bc > 0) p.bc -= dt;
-      if (p.sc > 0) p.sc -= dt;
+      if (p.noCd) {
+        p.ch = 3; p.rc = CHARGE_T; p.st = 0; p.bc = 0; p.sc = 0;
+      } else {
+        if (p.ch < 3) { p.rc += dt; if (p.rc >= CHARGE_T) { p.ch++; p.rc = 0; } }
+        if (p.st > 0) p.st -= dt;
+        if (p.bc > 0) p.bc -= dt;
+        if (p.sc > 0) p.sc -= dt;
+      }
       if (p.bw > 0) { p.bw -= dt; if (p.bw <= 0) { p.bw = 0; dash(m, i, ev); } }
-      if (p.sw >= 0) { p.sw += dt; if (p.sw > 0.34) { p.sw = -1; p.sc = SWING_CD; } }
+      if (p.sw >= 0) { p.sw += dt; if (p.sw > 0.34) { p.sw = -1; p.sc = p.noCd ? 0 : SWING_CD; } }
       if (p.pa >= 0) { p.pa += dt; if (p.pa > 0.8) p.pa = -1; }
     }
     for (i = 0; i < n; i++) {
@@ -200,7 +217,7 @@
     }
     for (i = 0; i < n; i++) {
       p = m.p[i]; u = inp[i] || {};
-      if (!p || p.dead || p.st > 0) continue;
+      if (!p || p.dead || (!p.noCd && p.st > 0)) continue;
       l = Math.hypot(p.ix, p.iy);
       if (p.sw < 0 && p.bw <= 0) {
         if (typeof u.aim === 'number' && isFinite(u.aim)) p.fa = u.aim;

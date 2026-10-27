@@ -4,7 +4,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { Server } = require('socket.io');
 const G = require('./public/shared.js');
-const { createStore, rankOf } = require('./store.js');
+const { createStore, rankOf, OWNER_NAME, OWNER_KEY } = require('./store.js');
 
 const PORT = process.env.PORT || 3000;
 const WIN_ROUNDS = 5;
@@ -60,7 +60,7 @@ async function startRoom(users, mode, unranked) {
   rooms.set(id, room);
 
   const names = users.map(u => u.name);
-  const ranks = users.map(u => rankOf(u.mmr));
+  const ranks = users.map(u => rankOf(u.mmr, u.name));
   const mmrs = users.map(u => u.mmr);
   const looks = [];
   for (let i = 0; i < users.length; i++) {
@@ -88,7 +88,7 @@ async function startFFARoom(users) {
   rooms.set(id, room);
 
   const names = users.map(u => u.name);
-  const ranks = users.map(u => rankOf(u.mmr));
+  const ranks = users.map(u => rankOf(u.mmr, u.name));
   const mmrs = users.map(u => u.mmr);
   const looks = [];
   for (let i = 0; i < users.length; i++) {
@@ -210,6 +210,12 @@ function ipOf(s) {
 
 const authed = (s, token) => !!s.data.key && store.sessionValid(s.data.sh, s.data.key) && (token === undefined || store.tokenMatches(token, s.data.sh));
 
+async function isOwnerSocket(s) {
+  if (!s.data.key) return false;
+  const p = await store.profile(s.data.key);
+  return !!(p && p.isOwner);
+}
+
 function enter(s, r) {
   for (const other of io.sockets.sockets.values()) {
     if (other !== s && other.data.key === r.key) { other.emit('kicked'); other.disconnect(true); }
@@ -256,8 +262,10 @@ io.on('connection', (s) => {
     const r = store.resume(d.token);
     if (r.legacy) return cb({ legacy: true, name: r.name });
     if (r.err) return cb({ err: r.err });
+    const p = await store.profile(r.key);
+    if (!p) return cb({ err: 'Account unavailable or banned' });
     enter(s, r);
-    cb({ ok: true, profile: await store.profile(r.key), token: d.token });
+    cb({ ok: true, profile: p, token: d.token });
   }));
 
   s.on('claim', (d, cb) => handle(cb, async () => {
@@ -405,6 +413,67 @@ io.on('connection', (s) => {
   }));
 
   s.on('partyLeave', () => { leaveParty(s); });
+
+  // ---------- Admin Operations ----------
+  s.on('admin_get_users', async (cb) => handle(cb, async () => {
+    if (!(await isOwnerSocket(s))) return cb({ err: 'Unauthorized' });
+    cb({ ok: true, users: await store.adminGetUsers() });
+  }));
+
+  s.on('admin_set_ban', async (d, cb) => handle(cb, async () => {
+    if (!(await isOwnerSocket(s))) return cb({ err: 'Unauthorized' });
+    d = d || {};
+    const res = await store.adminSetBan(d.key, d.banned);
+    if (res.err) return cb({ err: res.err });
+    if (d.banned) {
+      for (const other of io.sockets.sockets.values()) {
+        if (other.data.key === d.key) {
+          other.emit('kicked');
+          other.disconnect(true);
+        }
+      }
+    }
+    cb({ ok: true, banned: res.banned });
+  }));
+
+  s.on('admin_set_mmr', async (d, cb) => handle(cb, async () => {
+    if (!(await isOwnerSocket(s))) return cb({ err: 'Unauthorized' });
+    d = d || {};
+    const res = await store.adminSetMmr(d.key, d.mmr);
+    if (res.err) return cb({ err: res.err });
+    cb({ ok: true, mmr: res.mmr, rank: res.rank });
+  }));
+
+  s.on('admin_match_kill_enemies', () => {
+    const room = s.data.room;
+    if (!room || !isOwnerSocket(s)) return;
+    const myIdx = s.data.idx;
+    room.m.p.forEach((p, idx) => {
+      if (idx !== myIdx && !p.dead) {
+        p.dead = true;
+      }
+    });
+  });
+
+  s.on('admin_match_toggle_god', (cb) => {
+    const room = s.data.room;
+    if (!room || !isOwnerSocket(s)) return;
+    const p = room.m.p[s.data.idx];
+    if (p) {
+      p.god = !p.god;
+      if (typeof cb === 'function') cb({ god: p.god });
+    }
+  });
+
+  s.on('admin_match_toggle_nocd', (cb) => {
+    const room = s.data.room;
+    if (!room || !isOwnerSocket(s)) return;
+    const p = room.m.p[s.data.idx];
+    if (p) {
+      p.noCd = !p.noCd;
+      if (typeof cb === 'function') cb({ noCd: p.noCd });
+    }
+  });
 
   // ---------- Gameplay Inputs ----------
   s.on('in', (d) => {

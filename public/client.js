@@ -32,6 +32,7 @@
   var TRAIL_TINT = { silver: '#d6d2c8', gold: '#e5b842', platinum: '#c9331f' };
   var looks = ['none', 'none'];
   var teams = [0, 1];
+  var godActive = false, noCdActive = false;
 
   function hexA(h, a) { return 'rgba(' + parseInt(h.slice(1, 3), 16) + ',' + parseInt(h.slice(3, 5), 16) + ',' + parseInt(h.slice(5, 7), 16) + ',' + a + ')'; }
   function strokePath(g, pts, px, py, col, w) {
@@ -230,6 +231,7 @@
     $('savebtn').hidden = !prof;
     $('logout').hidden = !prof;
     $('cooplocalbtn').hidden = touch;
+    $('adminbar').hidden = !(prof && prof.isOwner);
     show('lobby');
   }
   function setProfile(p) {
@@ -247,6 +249,7 @@
     $('prog').style.width = (hasNext ? Math.min(1, (p.mmr - r.min) / (r.next - r.min)) * 100 : 100) + '%';
     $('prog').style.background = r.c;
     $('nextlbl').textContent = p.isOwner ? 'Infinite Reign' : (hasNext ? (r.next - p.mmr) + ' to ' + RANKS[RANKS.indexOf(r) + 1].n : 'Top rank');
+    $('adminbar').hidden = !p.isOwner;
   }
 
   function result(title, d1, d2, delta, sound) {
@@ -320,6 +323,7 @@
   }
   function toLogin(msg) {
     prof = null; mode = null;
+    $('adminbar').hidden = true;
     setAuthMode('login'); show('login');
     if (msg) $('err').textContent = msg;
   }
@@ -442,6 +446,76 @@
     $('partyready').textContent = d.host ? 'Ready (Host)' : 'Toggle Ready';
   });
 
+  // ---------- Admin Panel Interactions ----------
+  $('adminbtn').onclick = function () {
+    if (!prof || !prof.isOwner) return;
+    var inMatch = (mode === 'online' || mode === 'ffa' || mode === '2v2');
+    $('adminMatchTools').hidden = !inMatch;
+    $('adminMenuTools').hidden = inMatch;
+    if (!inMatch) loadAdminUserList();
+    show('adminpanel');
+  };
+  $('adminClose').onclick = function () {
+    if (mode) show(null);
+    else showLobby();
+  };
+
+  function loadAdminUserList() {
+    var list = $('adminUserList');
+    list.innerHTML = '<div style="padding:10px;text-align:center">Loading user records...</div>';
+    sock.emit('admin_get_users', function (r) {
+      if (!r || !r.ok) { list.innerHTML = '<div style="padding:10px;color:var(--redhi)">Failed to load data</div>'; return; }
+      list.innerHTML = '';
+      r.users.forEach(function (u) {
+        var row = document.createElement('div');
+        row.className = 'adm-user-row';
+        row.innerHTML = '<div><b>' + u.name + '</b> <small>(' + u.rank + ', ' + u.mmr + ' MMR' + (u.banned ? ' - <span style="color:var(--redhi)">BANNED</span>' : '') + ')</small></div>' +
+          '<div style="display:flex;gap:4px;align-items:center">' +
+          '<input type="number" id="mmr_' + u.key + '" placeholder="MMR" value="' + u.mmr + '">' +
+          '<button class="sec" id="setmmr_' + u.key + '">Save</button>' +
+          '<button style="background:' + (u.banned ? 'var(--gold)' : 'var(--red)') + '" id="ban_' + u.key + '">' + (u.banned ? 'Unban' : 'Ban') + '</button>' +
+          '</div>';
+        list.appendChild(row);
+
+        $('setmmr_' + u.key).onclick = function () {
+          var val = $('mmr_' + u.key).value;
+          sock.emit('admin_set_mmr', { key: u.key, mmr: val }, function (resp) {
+            if (resp && resp.ok) { toast('MMR Updated (' + resp.mmr + ')'); loadAdminUserList(); }
+            else toast((resp && resp.err) || 'Error', true);
+          });
+        };
+        $('ban_' + u.key).onclick = function () {
+          sock.emit('admin_set_ban', { key: u.key, banned: !u.banned }, function (resp) {
+            if (resp && resp.ok) { toast(resp.banned ? 'Player Banned' : 'Player Unbanned'); loadAdminUserList(); }
+            else toast((resp && resp.err) || 'Error', true);
+          });
+        };
+      });
+    });
+  }
+
+  $('admKillAll').onclick = function () {
+    sock.emit('admin_match_kill_enemies');
+    toast('Annihilated enemies');
+    show(null);
+  };
+  $('admGod').onclick = function () {
+    sock.emit('admin_match_toggle_god', function (r) {
+      godActive = r.god;
+      $('admGod').textContent = 'Invulnerability: ' + (godActive ? 'ON' : 'OFF');
+      $('admGod').style.color = godActive ? 'var(--gold)' : 'var(--bone)';
+      toast('God Mode ' + (godActive ? 'Enabled' : 'Disabled'));
+    });
+  };
+  $('admNoCd').onclick = function () {
+    sock.emit('admin_match_toggle_nocd', function (r) {
+      noCdActive = r.noCd;
+      $('admNoCd').textContent = 'No Cooldowns: ' + (noCdActive ? 'ON' : 'OFF');
+      $('admNoCd').style.color = noCdActive ? 'var(--gold)' : 'var(--bone)';
+      toast('No Cooldowns ' + (noCdActive ? 'Enabled' : 'Disabled'));
+    });
+  };
+
   // ---------- Look Picker ----------
   $('lookbtn').onclick = function () { renderLooks(); show('wardrobe'); };
   $('lookback').onclick = showLobby;
@@ -562,7 +636,7 @@
       sock.emit('resume', { token: t }, function (r) {
         if (r && r.ok) { setProfile(r.profile); if (cur === 'login') showLobby(); }
         else if (r && r.legacy) { claimToken = t; setAuthMode('claim', r.name); if (cur === 'login') show('login'); }
-        else if (r && r.err === 'Please log in') { setToken(''); if (prof || cur !== 'login') toLogin('Your session ended, please log in again.'); }
+        else if (r && r.err) { setToken(''); if (prof || cur !== 'login') toLogin(r.err || 'Session ended'); }
         else if (n < 5) setTimeout(function () { resume(n + 1); }, 2000);
       });
     };
@@ -601,7 +675,7 @@
       result(won ? 'Victory' : 'Defeat', why + (d.score ? names[0] + ' ' + d.score[0] + ' - ' + d.score[1] + ' ' + names[1] : ''),
         line, d.delta ? (d.delta > 0 ? '+' : '') + d.delta + ' MMR' : '', won ? 'win' : 'lose');
     });
-    sock.on('kicked', function () { toLogin('You signed in somewhere else.'); });
+    sock.on('kicked', function () { toLogin('You have been disconnected.'); });
     sock.on('unauth', function () { setToken(''); toLogin('Your session ended, please log in again.'); });
     sock.on('disconnect', function () {
       if (mode === 'online' || mode === 'ffa') { mode = null; result('Disconnected', 'Lost connection to server.', '', '', 'lose'); }
@@ -717,6 +791,8 @@
         burst(e.x, e.y, GOLD, 26); ring(e.x, e.y, GOLD, R + 60, 0.45, 5); stain(e.x, e.y, GOLD, 8, 18);
         say(e.b ? 'Dash punished!' : 'Parried!', 0.8);
         shake = 7; punch = 0.02; hitStop(0.08); snd('parry', e.x); vib(15);
+      } else if (e.t === 'god_block') {
+        burst(e.x, e.y, '#ffffff', 14); ring(e.x, e.y, GOLD, R + 30, 0.3, 4);
       } else if (e.t === 'intercept') {
         say('Blink Intercepted! +50', 0.9);
       } else if (e.t === 'extract') {
@@ -764,7 +840,7 @@
     if (e.target && e.target.closest && e.target.closest('button')) snd('click');
   });
   addEventListener('keydown', function (e) {
-    if (e.target && e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT')) return;
     var k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
     if (k === 'm' && typeof Sfx !== 'undefined') { Sfx.toggle(); syncMute(); return; }
     if (mode && (k.indexOf('Arrow') === 0 || k === ' ' || k === '/' || k === ',' || k === '.')) e.preventDefault();
@@ -1036,6 +1112,12 @@
         ctx.arc(px, py, R + 8, -1.57, -1.57 + ratio * 6.283); ctx.stroke();
       }
 
+      // God Mode Aura
+      if (p.god) {
+        ctx.strokeStyle = GOLD; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(px, py, R + 4 + Math.sin(now / 150) * 2, 0, 6.283); ctx.stroke();
+      }
+
       lookBelow(ctx, look, px, py, c, now);
       var shine = p.bw > 0 ? 1 - p.bw / S.BLINK_WIND : -1;
       ctx.shadowBlur = 0; ctx.fillStyle = p.st > 0 ? '#9c9484' : c;
@@ -1057,7 +1139,7 @@
       if ((mode === 'online' || mode === 'ffa') && i === me) {
         ctx.fillStyle = (prof && prof.isOwner) ? '#c9331f' : INK;
         ctx.font = '700 14px "Barlow Condensed", sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
-        ctx.fillText((prof && prof.isOwner) ? '[OWNER] YOU' : 'YOU', px, py - R - 18);
+        ctx.fillText((prof && prof.isOwner) ? '[OWNER] ' + prof.name : 'YOU', px, py - R - 18);
       }
     });
 

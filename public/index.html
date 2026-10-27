@@ -81,10 +81,20 @@ button:focus-visible{outline:3px solid var(--gold);outline-offset:3px}
 .tb.down{translate:2px 2px;box-shadow:1px 1px 0 #000}
 .tb.cd{opacity:.4}
 
-/* Big Button Styling for the Co-op & Modes Screen */
+/* Big Button Styling for Co-op & Modes */
 .big-opt{padding:14px 18px;font-size:22px;letter-spacing:.08em;display:flex;flex-direction:column;gap:3px;align-items:center;justify-content:center}
 .big-opt small{font-size:13px;letter-spacing:.04em;text-transform:none;color:var(--dim);font-weight:500}
 .big-opt:hover small{color:var(--ink)}
+
+/* Top Right Fixed Admin Button */
+#adminbar{position:fixed;top:12px;right:14px;z-index:60}
+#adminbtn{background:#000;color:var(--gold);border:2px solid var(--gold);padding:6px 14px;font:700 16px var(--ui);letter-spacing:.08em;width:auto;cursor:pointer;box-shadow:3px 3px 0 #000}
+#adminbtn:hover{background:var(--gold);color:#000}
+
+/* Admin Panel Table & Tools */
+.adm-user-row{display:flex;align-items:center;justify-content:space-between;padding:6px 8px;border-bottom:1px solid var(--line);gap:6px}
+.adm-user-row input{width:70px;padding:3px;font-size:14px}
+.adm-user-row button{width:auto;padding:3px 8px;font-size:12px}
 
 @media (pointer:coarse){
   body{padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);gap:8px;overscroll-behavior:none;-webkit-touch-callout:none;height:100dvh}
@@ -103,7 +113,7 @@ button:focus-visible{outline:3px solid var(--gold);outline-offset:3px}
   #tbBlink{order:1}#tbParry{order:2}#tbSwing{order:3}
 }
 @media (max-width:480px){#hud{font-size:16px;padding:5px 10px}#rnd{font-size:11px}}
-#toast{position:fixed;z-index:60;left:50%;top:calc(14px + env(safe-area-inset-top,0px));transform:translateX(-50%) rotate(-1.5deg);background:#000;color:#fff;border:4px solid #fff;box-shadow:6px 6px 0 var(--red);padding:10px 18px;font:400 clamp(16px,4.6vw,22px) var(--disp);letter-spacing:.03em;text-transform:uppercase;white-space:nowrap;pointer-events:none}
+#toast{position:fixed;z-index:70;left:50%;top:calc(14px + env(safe-area-inset-top,0px));transform:translateX(-50%) rotate(-1.5deg);background:#000;color:#fff;border:4px solid #fff;box-shadow:6px 6px 0 var(--red);padding:10px 18px;font:400 clamp(16px,4.6vw,22px) var(--disp);letter-spacing:.03em;text-transform:uppercase;white-space:nowrap;pointer-events:none}
 #toast.bad{background:var(--red);box-shadow:6px 6px 0 #000}
 input:disabled{opacity:.6}
 #lookgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;width:100%}
@@ -118,6 +128,7 @@ input:disabled{opacity:.6}
 </style>
 </head>
 <body>
+<div id="adminbar" hidden><button id="adminbtn">ADMIN</button></div>
 <div id="wrap">
   <div id="hud"><span id="s0">P1</span><span id="rnd">Blade &amp; Blink</span><span id="s1">P2</span></div>
   <div id="stage">
@@ -200,6 +211,24 @@ input:disabled{opacity:.6}
         <button id="partystart" hidden>Start Match</button>
         <button class="sec" id="partyready">Toggle Ready</button>
         <button class="sec" id="partyleave">Leave Party</button>
+      </div>
+
+      <!-- Admin Panel Screen -->
+      <div class="screen" id="adminpanel">
+        <h2 style="color:var(--gold)">Admin Authority</h2>
+        <div id="adminMatchTools" hidden style="width:100%;display:flex;flex-direction:column;gap:8px">
+          <p style="color:var(--redhi);font-weight:700">IN-MATCH CHEATS</p>
+          <button id="admKillAll" style="background:#8b0000;border-color:#ff4444">Instant Kill Enemies</button>
+          <div class="row">
+            <button class="sec" id="admGod">Invulnerability: OFF</button>
+            <button class="sec" id="admNoCd">No Cooldowns: OFF</button>
+          </div>
+        </div>
+        <div id="adminMenuTools" style="width:100%;display:flex;flex-direction:column;gap:8px">
+          <p style="color:var(--gold);font-weight:700">PLAYER DATABASE &amp; MONETIZATION</p>
+          <div id="adminUserList" style="max-height:220px;overflow-y:auto;border:2px solid var(--line);background:var(--panel);width:100%;text-align:left;font-size:14px"></div>
+        </div>
+        <button class="sec" id="adminClose">Close</button>
       </div>
 
       <div class="screen" id="queue">

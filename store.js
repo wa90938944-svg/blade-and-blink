@@ -4,6 +4,7 @@ const crypto = require('crypto');
 
 const START_MMR = 300, WIN_MMR = 25, LOSS_MMR = 20;
 const RESERVED = new Set(['bot', 'bots', 'you', 'p1', 'p2', 'admin', 'server', 'system', '__proto__']);
+const OWNER_NAME = 'MASTERTETANUS';
 const OWNER_KEY = 'mastertetanus';
 
 const RANK_NAMES = ['Bronze', 'Silver', 'Gold', 'Platinum', 'Diamond', 'Owner'];
@@ -12,14 +13,16 @@ const ALL_LOOKS = ['none', 'bronze', 'silver', 'gold', 'platinum', 'diamond'];
 const LOOK_ORDER = ['none', 'bronze', 'silver', 'gold', 'platinum', 'diamond'];
 const topLook = (unlocked) => { let t = 'none'; for (const id of LOOK_ORDER) if (unlocked.includes(id)) t = id; return t; };
 
-const rankOf = (mmr, key) => {
-  if (key && key.toLowerCase() === OWNER_KEY) return 'Owner';
+const isOwnerAccount = (rawName) => rawName === OWNER_NAME;
+
+const rankOf = (mmr, name) => {
+  if (isOwnerAccount(name)) return 'Owner';
   return (mmr >= 2000 ? 'Diamond' : mmr >= 1500 ? 'Platinum' : mmr >= 1000 ? 'Gold' : mmr >= 500 ? 'Silver' : 'Bronze');
 };
 
-const unlocksFor = (peak, key) => {
-  if (key && key.toLowerCase() === OWNER_KEY) return ALL_LOOKS.slice();
-  const r = RANK_NAMES.indexOf(rankOf(peak, key)), out = [];
+const unlocksFor = (peak, name) => {
+  if (isOwnerAccount(name)) return ALL_LOOKS.slice();
+  const r = RANK_NAMES.indexOf(rankOf(peak, name)), out = [];
   if (r < 0) return ['none'];
   for (const slot of Object.keys(COSMETICS)) {
     for (const id of Object.keys(COSMETICS[slot])) {
@@ -34,6 +37,9 @@ function normalizeName(raw) {
   const name = String(raw == null ? '' : raw).normalize('NFKC').replace(/\s+/g, ' ').trim();
   if (!/^[\w \-]{2,16}$/.test(name)) return { err: 'Use 2-16 letters, numbers, spaces, - or _' };
   const key = name.toLowerCase();
+  if (key === OWNER_KEY && name !== OWNER_NAME) {
+    return { err: 'That name is reserved' };
+  }
   if (key !== OWNER_KEY && RESERVED.has(key)) return { err: 'That name is reserved' };
   return { name, key };
 }
@@ -105,9 +111,9 @@ function createStore(uri) {
     const existing = await users.findOne({ key: n.key });
     if (existing) return { err: 'That name is already taken' };
 
-    const isOwner = (n.key === OWNER_KEY);
+    const isOwner = isOwnerAccount(n.name);
     const passwordHash = hashPassword(password);
-    const earned = isOwner ? ALL_LOOKS.slice() : unlocksFor(START_MMR, n.key);
+    const earned = isOwner ? ALL_LOOKS.slice() : unlocksFor(START_MMR, n.name);
     const doc = {
       key: n.key,
       name: n.name,
@@ -121,6 +127,7 @@ function createStore(uri) {
       unlocked: earned,
       equipped: { look: isOwner ? 'diamond' : 'none' },
       isOwner: isOwner,
+      banned: false,
       created: Date.now(),
       seen: Date.now()
     };
@@ -141,6 +148,7 @@ function createStore(uri) {
 
     const user = await users.findOne({ key: n.key });
     if (!user) return { err: 'Account not found. Please register first.' };
+    if (user.banned) return { err: 'This account has been banned by an administrator.' };
 
     if (!verifyPassword(password, user.passwordHash)) {
       return { err: 'Incorrect password' };
@@ -170,14 +178,15 @@ function createStore(uri) {
     await waitForDb();
     const user = await users.findOne({ key });
     if (!user) return null;
-    const isOwner = (key === OWNER_KEY || !!user.isOwner);
-    const earned = unlocksFor(user.peak || user.mmr, key);
+    if (user.banned) return null;
+    const isOwner = isOwnerAccount(user.name);
+    const earned = unlocksFor(user.peak || user.mmr, user.name);
     const unlocked = isOwner ? ALL_LOOKS.slice() : Array.from(new Set((Array.isArray(user.unlocked) ? user.unlocked : []).concat(earned)));
     const look = (user.equipped && user.equipped.look) || user.activeLook || 'none';
     return {
       name: user.name,
       mmr: user.mmr,
-      rank: rankOf(user.mmr, key),
+      rank: rankOf(user.mmr, user.name),
       wins: user.wins,
       losses: user.losses,
       streak: user.streak,
@@ -186,6 +195,7 @@ function createStore(uri) {
       unlocked: unlocked,
       equipped: { look: unlocked.includes(look) ? look : topLook(unlocked) },
       isOwner: isOwner,
+      banned: !!user.banned,
       savedAt: user.seen || Date.now()
     };
   }
@@ -211,13 +221,13 @@ function createStore(uri) {
     await waitForDb();
     const w = await users.findOne({ key: winKey });
     const l = await users.findOne({ key: loseKey });
-    if (!w || !l) return { win: { delta: WIN_MMR, oldRank: rankOf(START_MMR, winKey) }, lose: { delta: LOSS_MMR, oldRank: rankOf(START_MMR, loseKey) } };
+    if (!w || !l) return { win: { delta: WIN_MMR, oldRank: rankOf(START_MMR, '') }, lose: { delta: LOSS_MMR, oldRank: rankOf(START_MMR, '') } };
 
-    const w0 = w.mmr, l0 = l.mmr, wr = rankOf(w0, winKey), lr = rankOf(l0, loseKey);
+    const w0 = w.mmr, l0 = l.mmr, wr = rankOf(w0, w.name), lr = rankOf(l0, l.name);
     const newWMMR = w0 + WIN_MMR;
     const newPeak = Math.max(w.peak || START_MMR, newWMMR);
-    const earned = unlocksFor(newPeak, winKey);
-    const newUnlocked = (winKey === OWNER_KEY) ? ALL_LOOKS.slice() : Array.from(new Set((Array.isArray(w.unlocked) ? w.unlocked : []).concat(earned)));
+    const earned = unlocksFor(newPeak, w.name);
+    const newUnlocked = isOwnerAccount(w.name) ? ALL_LOOKS.slice() : Array.from(new Set((Array.isArray(w.unlocked) ? w.unlocked : []).concat(earned)));
 
     await users.updateOne({ key: winKey }, {
       $inc: { mmr: WIN_MMR, wins: 1, games: 1, streak: 1 },
@@ -238,12 +248,12 @@ function createStore(uri) {
     const user = await users.findOne({ key });
     if (!user) return null;
     const oldMmr = user.mmr;
-    const oldRank = rankOf(oldMmr, key);
+    const oldRank = rankOf(oldMmr, user.name);
     const delta = Math.floor(points / 10);
     const newMmr = oldMmr + delta;
     const newPeak = Math.max(user.peak || START_MMR, newMmr);
-    const earned = unlocksFor(newPeak, key);
-    const newUnlocked = (key === OWNER_KEY) ? ALL_LOOKS.slice() : Array.from(new Set((Array.isArray(user.unlocked) ? user.unlocked : []).concat(earned)));
+    const earned = unlocksFor(newPeak, user.name);
+    const newUnlocked = isOwnerAccount(user.name) ? ALL_LOOKS.slice() : Array.from(new Set((Array.isArray(user.unlocked) ? user.unlocked : []).concat(earned)));
 
     await users.updateOne({ key }, {
       $inc: { mmr: delta },
@@ -254,25 +264,66 @@ function createStore(uri) {
 
   async function top(n) {
     await waitForDb();
-    const list = await users.find({ games: { $gt: 0 } })
+    const list = await users.find({ games: { $gt: 0 }, banned: { $ne: true } })
       .sort({ mmr: -1, wins: -1 })
       .limit(n)
       .toArray();
     return list.map(p => ({
       name: p.name,
       mmr: p.mmr,
-      rank: rankOf(p.mmr, p.key),
+      rank: rankOf(p.mmr, p.name),
       wins: p.wins,
       losses: p.losses,
-      isOwner: p.key === OWNER_KEY || !!p.isOwner
+      isOwner: isOwnerAccount(p.name)
     }));
+  }
+
+  // ---------- Admin Operations ----------
+  async function adminGetUsers() {
+    await waitForDb();
+    const list = await users.find({}).sort({ created: -1 }).toArray();
+    return list.map(u => ({
+      key: u.key,
+      name: u.name,
+      mmr: u.mmr,
+      rank: rankOf(u.mmr, u.name),
+      wins: u.wins,
+      losses: u.losses,
+      banned: !!u.banned,
+      isOwner: isOwnerAccount(u.name)
+    }));
+  }
+
+  async function adminSetBan(targetKey, banned) {
+    await waitForDb();
+    const target = await users.findOne({ key: targetKey });
+    if (!target) return { err: 'Player not found' };
+    if (isOwnerAccount(target.name)) return { err: 'Cannot ban owner' };
+    await users.updateOne({ key: targetKey }, { $set: { banned: !!banned } });
+    return { ok: true, banned: !!banned };
+  }
+
+  async function adminSetMmr(targetKey, newMmr) {
+    await waitForDb();
+    newMmr = Math.max(0, parseInt(newMmr, 10) || 0);
+    const target = await users.findOne({ key: targetKey });
+    if (!target) return { err: 'Player not found' };
+    const newPeak = Math.max(target.peak || 0, newMmr);
+    const earned = unlocksFor(newPeak, target.name);
+    const newUnlocked = isOwnerAccount(target.name) ? ALL_LOOKS.slice() : Array.from(new Set((Array.isArray(target.unlocked) ? target.unlocked : []).concat(earned)));
+    await users.updateOne({ key: targetKey }, { $set: { mmr: newMmr, peak: newPeak, unlocked: newUnlocked } });
+    return { ok: true, mmr: newMmr, rank: rankOf(newMmr, target.name) };
   }
 
   async function flush() {
     return true;
   }
 
-  return { register, login, resume, claim, sessionValid, tokenMatches, logout, saveData, equip, profile, record, bankExtracted, top, flush };
+  return {
+    register, login, resume, claim, sessionValid, tokenMatches, logout,
+    saveData, equip, profile, record, bankExtracted, top, flush,
+    adminGetUsers, adminSetBan, adminSetMmr
+  };
 }
 
-module.exports = { createStore, rankOf, normalizeName, START_MMR, WIN_MMR, LOSS_MMR, RANK_NAMES, COSMETICS, topLook, OWNER_KEY, ALL_LOOKS };
+module.exports = { createStore, rankOf, normalizeName, START_MMR, WIN_MMR, LOSS_MMR, RANK_NAMES, COSMETICS, topLook, OWNER_NAME, OWNER_KEY, ALL_LOOKS };
