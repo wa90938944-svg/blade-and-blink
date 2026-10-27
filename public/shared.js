@@ -1,16 +1,16 @@
 // Game rules shared by the server (authoritative online matches) and the
 // browser (local bot / 2-player / endless modes), so every mode plays identically.
 (function (root) {
-  var W = 640, H = 400, R = 13, PAR = 0.32, A0 = 0.08, A1 = 0.22;
+  var W = 640, H = 400, R = 13, PAR = 0.35, A0 = 0.08, A1 = 0.22;
   var FFA_W = 1800, FFA_H = 1200;
   var REACH = 56, BLINK_D = 120, BLINK_REC = 0.3, CHARGE_T = 3.5, SPAWN_T = 5, SWING_CD = 0.2, BLINK_WIND = 0.1;
   var SHRINE_R = 36, EXTRACT_TIME = 3.0;
 
   var TIERS = {
     player:  { lives: 1, maxHearts: 1, spd: 200, reach: REACH, scale: 1.0 },
-    novice:  { lives: 4, maxHearts: 1, spd: 190, reach: REACH, scale: 1.0 },
-    veteran: { lives: 5, maxHearts: 1, spd: 200, reach: REACH, scale: 1.0 },
-    apex:    { lives: 5, maxHearts: 2, spd: 215, reach: REACH + 12, scale: 1.0 },
+    novice:  { lives: 4, maxHearts: 1, spd: 185, reach: REACH, scale: 1.0 },
+    veteran: { lives: 5, maxHearts: 1, spd: 196, reach: REACH, scale: 1.0 },
+    apex:    { lives: 5, maxHearts: 2, spd: 204, reach: REACH + 5, scale: 1.0 },
     tetanus: { lives: 3, maxHearts: 5, spd: 175, reach: REACH + 36, scale: 2.2 }
   };
 
@@ -37,7 +37,8 @@
     var t = l ? cl(((px - ax) * vx + (py - ay) * vy) / l, 0, 1) : 0;
     return Math.hypot(ax + vx * t - px, ay + vy * t - py);
   }
-  function parrying(p) { return p.pa >= 0 && p.pa < PAR; }
+  // A stunned fighter cannot parry
+  function parrying(p) { return p.st <= 0 && p.pa >= 0 && p.pa < PAR; }
 
   function reset(m) {
     if (m.mode === '2v2') {
@@ -49,7 +50,7 @@
       ];
     } else {
       var p0 = mk(0, 90, 0, H / 2, 0, 'player');
-      if (m.botTier === 'apex') {
+      if (m.botTier === 'apex' || m.botTier === 'tetanus') {
         p0.lives = 5;
         p0.maxLives = 5;
       }
@@ -152,11 +153,18 @@
         target.dead = true;
       } else {
         target.hearts = target.maxHearts;
-        target.st = 0.55;
+        target.st = Math.max(target.st, 0.45);
         target.sw = -1;
+        target.pa = -1;
         target.bw = 0;
         ev.push({ t: 'lose_life', i: target.i, x: target.x, y: target.y, lives: target.lives });
       }
+    } else {
+      // Brief flinch when losing a heart so multi-heart bots can't instantly swing through your hit
+      target.st = Math.max(target.st, 0.35);
+      target.sw = -1;
+      target.pa = -1;
+      target.bw = 0;
     }
   }
 
@@ -167,7 +175,11 @@
     }
     if (parrying(d) && !a.unparryable) {
       d.whiffedParry = false;
-      d.pa = -1; // Immediately cancel parry recovery on a successful parry
+      // Zero parry recovery: immediately clear parry & cooldowns so defender can instant-counter
+      d.pa = -1;
+      d.sc = 0;
+      d.bc = 0;
+      d.st = 0;
       if (blink) {
         if (!a.god) applyDamage(a, ev);
         d.points = (d.points || 0) + 25;
@@ -175,7 +187,10 @@
         ev.push({ t: 'intercept', by: d.i, victim: a.i, x: d.x, y: d.y });
       } else {
         if (!a.god) {
-          a.st = 1.1; a.sw = -1; a.bw = 0;
+          a.st = 1.35; // Generous stun window so player can counter-attack easily
+          a.sw = -1;
+          a.pa = -1;
+          a.bw = 0;
         }
         d.points = (d.points || 0) + 15;
         d.parries = (d.parries || 0) + 1;
@@ -194,7 +209,10 @@
   function act(m, i, k, ev) {
     var p = m.p[i];
     if (!p || p.dead || (!p.noCd && p.st > 0)) return;
-    if (k === 'sw' && (p.noCd || (p.sw < 0 && p.pa < 0 && p.bc <= 0 && p.sc <= 0 && p.bw <= 0))) {
+    // Allow cancelling an active parry window (p.pa < PAR) directly into a swing or blink
+    var canCancelParry = p.pa < 0 || p.pa < PAR;
+    if (k === 'sw' && (p.noCd || (p.sw < 0 && canCancelParry && p.bc <= 0 && p.sc <= 0 && p.bw <= 0))) {
+      p.pa = -1; p.whiffedParry = false;
       p.sw = 0; p.hs = []; p.extract = 0;
       ev.push({ t: 'swing', i: i, x: p.x, y: p.y, scale: p.scale });
     }
@@ -202,7 +220,8 @@
       p.pa = 0; p.extract = 0; p.whiffedParry = true;
       ev.push({ t: 'raise', i: i, x: p.x, y: p.y });
     }
-    else if (k === 'bl' && (p.noCd || (p.ch > 0 && p.bc <= 0 && p.pa < 0 && p.sw < 0 && p.bw <= 0))) {
+    else if (k === 'bl' && (p.noCd || (p.ch > 0 && p.bc <= 0 && canCancelParry && p.sw < 0 && p.bw <= 0))) {
+      p.pa = -1; p.whiffedParry = false;
       var dx = p.ix, dy = p.iy;
       if (!dx && !dy) { dx = Math.cos(p.fa); dy = Math.sin(p.fa); }
       var l = Math.hypot(dx, dy) || 1;
@@ -316,11 +335,11 @@
     var a = m.p[0], o = {};
     b.at -= dt;
     if (b.at <= 0 && a && !a.dead) {
-      b.at = 0.18 + Math.random() * 0.22;
+      b.at = 0.2 + Math.random() * 0.22;
       var dx = a.x - b.x, dy = a.y - b.y, d = Math.hypot(dx, dy) || 1, ux = dx / d, uy = dy / d;
       var face = Math.cos(b.fa) * ux + Math.sin(b.fa) * uy;
       b.ax = ux; b.ay = uy;
-      if (a.sw >= 0 && a.sw < 0.2 && d < b.r + REACH + 18 && Math.random() < 0.2) {
+      if (a.sw >= 0 && a.sw < 0.2 && d < b.r + REACH + 18 && Math.random() < 0.18) {
         o.pa = true;
       } else if (d < b.r + REACH - 2) {
         if (face > 0.65 && Math.random() < 0.35) o.sw = true;
@@ -339,32 +358,27 @@
   function aiVeteran(m, b, dt) {
     var a = m.p[0], o = {};
     b.at -= dt;
-    if (a && !a.dead) {
+    if (a && !a.dead && b.at <= 0) {
+      b.at = 0.11 + Math.random() * 0.1;
       var dx = a.x - b.x, dy = a.y - b.y, d = Math.hypot(dx, dy) || 1, ux = dx / d, uy = dy / d;
       var face = Math.cos(b.fa) * ux + Math.sin(b.fa) * uy;
+      b.ax = ux; b.ay = uy;
 
-      if (a.sw >= 0 && a.sw < 0.19 && d < a.reach + b.r + 14 && b.pa < 0 && Math.random() < 0.78) {
+      if (a.sw >= 0 && a.sw < 0.2 && d < a.reach + b.r + 14 && b.pa < 0 && Math.random() < 0.38) {
         o.pa = true;
+      } else if (b.ch > 0 && b.bc <= 0 && d > 60 && d <= BLINK_D + 6) {
+        var fx2 = b.x + ux * BLINK_D, fy2 = b.y + uy * BLINK_D;
+        if (segd(b.x, b.y, fx2, fy2, a.x, a.y) < b.r + a.r - 4 && !parrying(a) && Math.random() < 0.25) {
+          o.bl = true;
+        }
       }
 
-      if (b.at <= 0) {
-        b.at = 0.08 + Math.random() * 0.08;
-        b.ax = ux; b.ay = uy;
-
-        if (!o.pa && b.ch > 0 && b.bc <= 0 && d > 55 && d <= BLINK_D + 8) {
-          var fx2 = b.x + ux * BLINK_D, fy2 = b.y + uy * BLINK_D;
-          if (segd(b.x, b.y, fx2, fy2, a.x, a.y) < b.r + a.r - 4 && !parrying(a) && Math.random() < 0.65) {
-            o.bl = true;
-          }
-        }
-
-        if (!o.pa && !o.bl) {
-          if (d < b.reach + a.r - 4 && (face > 0.65 || a.st > 0)) {
-            o.sw = true;
-          } else if (d < b.reach + 45) {
-            var s = Math.random() < 0.5 ? 1 : -1;
-            b.ax = ux * 0.75 - uy * 0.6 * s; b.ay = uy * 0.75 + ux * 0.6 * s;
-          }
+      if (!o.pa && !o.bl) {
+        if (d < b.reach + a.r - 4 && (face > 0.65 || a.st > 0) && Math.random() < 0.55) {
+          o.sw = true;
+        } else if (d < b.reach + 45) {
+          var s = Math.random() < 0.5 ? 1 : -1;
+          b.ax = ux * 0.75 - uy * 0.6 * s; b.ay = uy * 0.75 + ux * 0.6 * s;
         }
       }
     }
@@ -372,36 +386,34 @@
     return o;
   }
 
-  // 3. Apex CPU: Instant Parry, Continuous Dash-Kill Checks, Extended Reach, Relentless Mobility
+  // 3. Apex CPU: Challenging but fair (human-like reaction window, 48% parry rate, punishable swings)
   function aiApex(m, b, dt) {
     var a = m.p[0], o = {};
     b.at -= dt;
-    if (a && !a.dead) {
+    if (a && !a.dead && b.at <= 0) {
+      b.at = 0.085 + Math.random() * 0.075;
       var dx = a.x - b.x, dy = a.y - b.y, d = Math.hypot(dx, dy) || 1, ux = dx / d, uy = dy / d;
       var face = Math.cos(b.fa) * ux + Math.sin(b.fa) * uy;
+      b.ax = ux; b.ay = uy;
 
-      if (a.sw >= 0 && a.sw < 0.22 && d < a.reach + b.r + 18 && b.pa < 0 && b.sw < 0 && b.bw <= 0) {
+      // Reactive parry on tick (48% chance so player can land hits and bait parries)
+      if (a.sw >= 0 && a.sw < 0.22 && d < a.reach + b.r + 14 && b.pa < 0 && b.sw < 0 && b.bw <= 0 && Math.random() < 0.48) {
         o.pa = true;
       }
-
-      if (!o.pa && b.ch > 0 && b.bc <= 0 && b.sw < 0 && b.pa < 0 && d > 42 && d <= BLINK_D + 12) {
+      // Predictive dash-kill check (35% chance on tick when aligned)
+      else if (b.ch > 0 && b.bc <= 0 && b.sw < 0 && b.pa < 0 && d > 55 && d <= BLINK_D + 8 && Math.random() < 0.35) {
         var fx2 = b.x + ux * BLINK_D, fy2 = b.y + uy * BLINK_D;
         if (segd(b.x, b.y, fx2, fy2, a.x, a.y) < b.r + a.r - 3 && !parrying(a)) {
-          b.ax = ux; b.ay = uy;
           o.bl = true;
         }
       }
 
-      if (b.at <= 0) {
-        b.at = 0.045 + Math.random() * 0.05;
-        b.ax = ux; b.ay = uy;
-        if (!o.pa && !o.bl) {
-          if (d < b.reach + a.r - 2 && (face > 0.55 || a.st > 0)) {
-            o.sw = true;
-          } else if (d < b.reach + 36) {
-            var s = Math.random() < 0.5 ? 1 : -1;
-            b.ax = ux * 0.72 - uy * 0.68 * s; b.ay = uy * 0.72 + ux * 0.68 * s;
-          }
+      if (!o.pa && !o.bl) {
+        if (d < b.reach + a.r - 2 && (face > 0.6 || a.st > 0) && Math.random() < 0.65) {
+          o.sw = true;
+        } else if (d < b.reach + 42) {
+          var s = Math.random() < 0.5 ? 1 : -1;
+          b.ax = ux * 0.72 - uy * 0.68 * s; b.ay = uy * 0.72 + ux * 0.68 * s;
         }
       }
     }
@@ -514,7 +526,7 @@
           p.whiffedParry = false;
           ev.push({ t: 'whiff_parry', i: p.i, x: p.x, y: p.y });
         }
-        if (p.pa > 0.8) p.pa = -1;
+        if (p.pa > 0.72) p.pa = -1;
       }
     }
 
