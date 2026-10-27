@@ -28,8 +28,8 @@ h1{font-size:clamp(28px,5.5vw,46px)}
 h1 span{color:var(--red)}
 h2{font-size:clamp(24px,4.8vw,36px)}
 p{margin:0;color:var(--dim);font-size:16px;line-height:1.35}
-input{width:100%;font:600 21px var(--ui);letter-spacing:.04em;color:var(--bone);background:#0d0b09;border:2px solid var(--bone);border-radius:0;padding:10px 14px;text-align:center}
-input:focus{outline:3px solid var(--gold);outline-offset:2px}
+input,select{width:100%;font:600 21px var(--ui);letter-spacing:.04em;color:var(--bone);background:#0d0b09;border:2px solid var(--bone);border-radius:0;padding:10px 14px;text-align:center}
+input:focus,select:focus{outline:3px solid var(--gold);outline-offset:2px}
 button{font:700 19px var(--ui);letter-spacing:.09em;text-transform:uppercase;color:var(--bone);background:var(--red);border:2px solid var(--red);border-radius:0;padding:10px 16px;cursor:pointer;width:100%;box-shadow:3px 3px 0 #000;transition:transform .08s}
 button:hover:not(:disabled){transform:translate(-1px,-1px)}
 button:active:not(:disabled){transform:translate(2px,2px);box-shadow:1px 1px 0 #000}
@@ -61,17 +61,10 @@ button:focus-visible{outline:3px solid var(--gold);outline-offset:3px}
 #tools .ghost{font-size:15px}
 #forfeit{color:var(--redhi)}
 #forfeit.arm{background:var(--red);color:var(--bone);text-decoration:none;padding:3px 12px}
-#boardlist{list-style:none;margin:0;padding:0;width:100%;max-height:220px;overflow:auto;text-align:left}
-#boardlist li{display:flex;justify-content:space-between;gap:12px;padding:6px 10px;border-bottom:1px solid var(--line);font-weight:600;letter-spacing:.04em;text-transform:uppercase}
+#boardlist,#partymembers{list-style:none;margin:0;padding:0;width:100%;max-height:220px;overflow:auto;text-align:left}
+#boardlist li,#partymembers li{display:flex;justify-content:space-between;gap:12px;padding:6px 10px;border-bottom:1px solid var(--line);font-weight:600;letter-spacing:.04em;text-transform:uppercase}
 #boardlist li.me{background:var(--panel);color:var(--gold)}
 .stats{min-height:20px;font-size:14px}
-/* wardrobe look grid */
-#lookgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;width:100%;max-height:220px;overflow:auto}
-.look{display:flex;flex-direction:column;align-items:center;gap:4px;background:var(--panel);border:2px solid var(--line);padding:8px;cursor:pointer;width:100%;box-shadow:none}
-.look.sel{border-color:var(--gold);background:#252019}
-.look canvas{background:transparent}
-.look span{font-size:14px;font-weight:700}
-.look small{font-size:11px;color:var(--dim)}
 #pad{width:min(94vw,520px);display:flex;justify-content:space-between;align-items:center;gap:10px;touch-action:none;-webkit-touch-callout:none}
 #stick{position:relative;flex:none;width:clamp(104px,32vw,150px);aspect-ratio:1;border:3px solid var(--bone);border-radius:50%;background:rgba(27,24,20,.88);box-shadow:4px 4px 0 var(--red);touch-action:none}
 #stick::before,#stick::after{content:"";position:absolute;background:var(--line)}
@@ -104,6 +97,18 @@ button:focus-visible{outline:3px solid var(--gold);outline-offset:3px}
   #tbBlink{order:1}#tbParry{order:2}#tbSwing{order:3}
 }
 @media (max-width:480px){#hud{font-size:16px;padding:5px 10px}#rnd{font-size:11px}}
+#toast{position:fixed;z-index:60;left:50%;top:calc(14px + env(safe-area-inset-top,0px));transform:translateX(-50%) rotate(-1.5deg);background:#000;color:#fff;border:4px solid #fff;box-shadow:6px 6px 0 var(--red);padding:10px 18px;font:400 clamp(16px,4.6vw,22px) var(--disp);letter-spacing:.03em;text-transform:uppercase;white-space:nowrap;pointer-events:none}
+#toast.bad{background:var(--red);box-shadow:6px 6px 0 #000}
+input:disabled{opacity:.6}
+#lookgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;width:100%}
+.look{display:flex;flex-direction:column;align-items:center;gap:1px;padding:6px 4px;background:var(--panel);border:2px solid var(--line);color:var(--bone);box-shadow:none;text-transform:none;letter-spacing:.03em;font:600 15px var(--ui)}
+.look canvas{width:62px;height:62px;border:1px solid var(--line)}
+.look small{font:500 12px var(--ui);color:var(--dim)}
+.look.sel{border-color:var(--red)}
+.look.sel small{color:var(--gold)}
+.look:disabled{opacity:.55}
+#lookinfo{min-height:36px}
+@media (max-height:560px){#lookgrid{grid-template-columns:repeat(6,1fr)}.look canvas{width:44px;height:44px}.look small{display:none}}
 </style>
 </head>
 <body>
@@ -116,8 +121,8 @@ button:focus-visible{outline:3px solid var(--gold);outline-offset:3px}
         <h1>Blade <span>&amp;</span> Blink</h1>
         <p id="authSub">Log in to climb the ranked ladder.</p>
         <input id="name" maxlength="16" placeholder="Username" autocomplete="username" aria-label="Username">
-        <input id="pass" type="password" maxlength="64" placeholder="Password (8+ chars)" autocomplete="current-password" aria-label="Password">
-        <input id="pass2" type="password" maxlength="64" placeholder="Confirm password" autocomplete="new-password" aria-label="Confirm password" hidden>
+        <input id="pass" type="password" maxlength="128" placeholder="Password" autocomplete="current-password" aria-label="Password">
+        <input id="pass2" type="password" maxlength="128" placeholder="Repeat password" autocomplete="new-password" aria-label="Repeat password" hidden>
         <div class="err" id="err" role="alert"></div>
         <button id="enter">Log in</button>
         <button class="ghost" id="switch">New here? Create an account</button>
@@ -133,32 +138,58 @@ button:focus-visible{outline:3px solid var(--gold);outline-offset:3px}
             <div id="sub"><span id="nextlbl"></span><span id="wl"></span></div>
           </div>
         </div>
-        <button id="rank">Find Ranked Match</button>
+        <button id="rank">Find Ranked 1v1</button>
+        <button class="sec" id="ffabtn" hidden>FFA Shrine Extraction</button>
+        <button class="sec" id="partybtn" hidden>Custom Party / 2v2</button>
         <div class="row"><button class="sec" id="bot">Duel the bot</button><button class="sec" id="local">2 players, one keyboard</button></div>
         <button class="sec" id="endless">Endless bot mode</button>
-        <div class="row"><button class="sec" id="lookbtn">Wardrobe</button><button class="sec" id="savebtn">Save Data</button></div>
-        <div class="row"><button class="ghost" id="boardbtn" hidden>Leaderboard</button><button class="ghost" id="logout" hidden>Log out</button></div>
+        <div class="row"><button class="sec" id="savebtn" hidden>Save data</button><button class="sec" id="logout" hidden>Log out</button></div>
+        <div class="row"><button class="sec" id="lookbtn" hidden>Your look</button><button class="sec" id="boardbtn" hidden>Leaderboard</button></div>
         <p id="hint">Ranked: WASD move, mouse aims, click swings, right-click or E parries, Space blinks.</p>
         <p class="stats"></p>
       </div>
+
+      <div class="screen" id="partymenu">
+        <h2>Private Party</h2>
+        <select id="partymode">
+          <option value="1v1">1v1 Duel (Unranked)</option>
+          <option value="2v2">2v2 Co-op Duel (Unranked)</option>
+        </select>
+        <button id="partycreate">Create Room</button>
+        <div class="row">
+          <input id="partycode" placeholder="ROOM CODE (e.g. INK-492)">
+          <button class="sec" id="partyjoin">Join</button>
+        </div>
+        <button class="sec" id="partyback">Back</button>
+      </div>
+
+      <div class="screen" id="partyroom">
+        <h2>Room: <span id="roomcode" style="color:var(--gold)"></span></h2>
+        <p>Mode: <span id="roommode">1V1</span></p>
+        <ul id="partymembers"></ul>
+        <button id="partystart" hidden>Start Match</button>
+        <button class="sec" id="partyready">Toggle Ready</button>
+        <button class="sec" id="partyleave">Leave Party</button>
+      </div>
+
       <div class="screen" id="queue">
         <div class="spin"></div>
-        <h2>Finding an opponent</h2>
+        <h2>Finding Match</h2>
         <div id="qt">0:00</div>
-        <p>The search widens the longer you wait.</p>
+        <p>Searching for fighters...</p>
         <p class="stats"></p>
         <button class="sec" id="cancel">Cancel</button>
+      </div>
+      <div class="screen" id="wardrobe">
+        <h2>Your look</h2>
+        <div id="lookgrid"></div>
+        <p id="lookinfo"></p>
+        <button class="sec" id="lookback">Back</button>
       </div>
       <div class="screen" id="board">
         <h2>Top ladder</h2>
         <ol id="boardlist"></ol>
         <button class="sec" id="boardback">Back</button>
-      </div>
-      <div class="screen" id="wardrobe">
-        <h2>Wardrobe</h2>
-        <p id="lookinfo">Pick a look to wear into battle.</p>
-        <div id="lookgrid"></div>
-        <button class="sec" id="lookback">Back</button>
       </div>
       <div class="screen" id="result">
         <h2 id="rt">Victory</h2>
@@ -171,6 +202,7 @@ button:focus-visible{outline:3px solid var(--gold);outline-offset:3px}
     </div>
   </div>
 </div>
+<div id="toast" role="status" aria-live="polite" hidden></div>
 <div id="pad" hidden>
   <div id="stick" aria-label="Move"><div id="knob"></div></div>
   <div id="btns">

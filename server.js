@@ -7,9 +7,8 @@ const G = require('./public/shared.js');
 const { createStore, rankOf } = require('./store.js');
 
 const PORT = process.env.PORT || 3000;
-const WIN_ROUNDS = 5; // first to 5 = best of 9
+const WIN_ROUNDS = 5;
 
-// Use MongoDB connection string from environment variable (falls back to local mongo if unset)
 const store = createStore(process.env.DATABASE_URL || 'mongodb://127.0.0.1:27017/blade_and_blink');
 
 const app = express();
@@ -17,9 +16,19 @@ app.use(express.static(path.join(__dirname, 'public'), { setHeaders: (res) => re
 const server = http.createServer(app);
 const io = new Server(server);
 
-// ---------- matchmaking ----------
+// ---------- Matchmaking & State ----------
 let queue = [];
+let ffaQueue = [];
 const rooms = new Map();
+const parties = new Map();
+
+function generatePartyCode() {
+  var code;
+  do {
+    code = 'INK-' + Math.floor(100 + Math.random() * 900);
+  } while (parties.has(code));
+  return code;
+}
 
 function tryMatch() {
   const now = Date.now();
@@ -29,53 +38,128 @@ function tryMatch() {
       const waited = Math.max(now - a.since, now - b.since) / 1000;
       if (Math.abs(a.mmr - b.mmr) <= 100 + 50 * waited) {
         queue.splice(j, 1); queue.splice(i, 1);
-        startRoom(a, b);
+        startRoom([a, b], '1v1', false);
         return tryMatch();
       }
     }
   }
+
+  if (ffaQueue.length >= 2) {
+    const batch = ffaQueue.splice(0, 4);
+    startFFARoom(batch);
+  }
 }
 setInterval(tryMatch, 1000);
 
-async function startRoom(a, b) {
+async function startRoom(users, mode, unranked) {
   const id = crypto.randomBytes(4).toString('hex');
-  const room = { id, users: [a, b], m: G.create(WIN_ROUNDS), inp: [{}, {}], done: false };
+  const winRounds = mode === '2v2' ? 5 : WIN_ROUNDS;
+  const matchObj = mode === '2v2' ? G.create2v2(winRounds) : G.create(winRounds);
+  const inps = users.map(() => ({}));
+  const room = { id, users, m: matchObj, inp: inps, done: false, mode: mode || '1v1', unranked: !!unranked };
   rooms.set(id, room);
-  const pA = await store.profile(a.key);
-  const pB = await store.profile(b.key);
-  const lookA = (pA && pA.equipped && pA.equipped.look) || 'none';
-  const lookB = (pB && pB.equipped && pB.equipped.look) || 'none';
-  const info = {
-    names: [a.name, b.name],
-    ranks: [rankOf(a.mmr), rankOf(b.mmr)],
-    mmrs: [a.mmr, b.mmr],
-    looks: [lookA, lookB]
-  };
-  [a, b].forEach((u, i) => {
+
+  const names = users.map(u => u.name);
+  const ranks = users.map(u => rankOf(u.mmr));
+  const mmrs = users.map(u => u.mmr);
+  const looks = [];
+  for (let i = 0; i < users.length; i++) {
+    const prof = await store.profile(users[i].key);
+    looks.push((prof && prof.equipped && prof.equipped.look) || 'none');
+  }
+
+  const teams = mode === '2v2' ? [0, 0, 1, 1] : [0, 1];
+  const info = { id, names, ranks, mmrs, looks, mode: room.mode, unranked: room.unranked, teams };
+
+  users.forEach((u, i) => {
     u.s.join(id);
     u.s.data.room = room;
     u.s.data.idx = i;
-    u.s.emit('match', Object.assign({ id, you: i }, info));
+    u.s.emit('match', Object.assign({ you: i }, info));
   });
-  console.log(`room ${id}: ${a.name} (${a.mmr}) vs ${b.name} (${b.mmr})`);
+  console.log(`[room ${id}] ${mode} started: ${names.join(', ')}`);
+}
+
+async function startFFARoom(users) {
+  const id = crypto.randomBytes(4).toString('hex');
+  const matchObj = G.createFFA(users);
+  const inps = users.map(() => ({}));
+  const room = { id, users, m: matchObj, inp: inps, done: false, mode: 'ffa', ffa: true };
+  rooms.set(id, room);
+
+  const names = users.map(u => u.name);
+  const ranks = users.map(u => rankOf(u.mmr));
+  const mmrs = users.map(u => u.mmr);
+  const looks = [];
+  for (let i = 0; i < users.length; i++) {
+    const prof = await store.profile(users[i].key);
+    looks.push((prof && prof.equipped && prof.equipped.look) || 'none');
+  }
+
+  const info = { id, names, ranks, mmrs, looks, mode: 'ffa', shrines: matchObj.shrines };
+  users.forEach((u, i) => {
+    u.s.join(id);
+    u.s.data.room = room;
+    u.s.data.idx = i;
+    u.s.emit('match', Object.assign({ you: i }, info));
+  });
+  console.log(`[FFA ${id}] extraction arena started with ${names.length} fighters`);
 }
 
 async function finish(room, winner, forfeit, quit) {
   if (room.done) return;
   room.done = true;
   rooms.delete(room.id);
-  const res = await store.record(room.users[winner].key, room.users[1 - winner].key);
+
+  if (room.ffa) {
+    room.users.forEach(async (u, i) => {
+      const p = room.m.p[i];
+      const banked = p && !p.rip && p.extract >= G.EXTRACT_TIME;
+      const pts = (banked && p) ? (p.points || 0) : 0;
+      let res = null;
+      if (pts > 0) res = await store.bankExtracted(u.key, pts);
+      const prof = await store.profile(u.key);
+      u.s.leave(room.id);
+      u.s.data.room = null;
+      u.s.emit('end', {
+        mode: 'ffa', you: i, winner: winner, extracted: banked, points: pts,
+        delta: res ? res.delta : 0, oldRank: res ? res.oldRank : prof.rank, profile: prof
+      });
+    });
+    return;
+  }
+
+  if (room.unranked) {
+    room.users.forEach(async (u, i) => {
+      u.s.leave(room.id);
+      u.s.data.room = null;
+      const prof = await store.profile(u.key);
+      u.s.emit('end', {
+        unranked: true, mode: room.mode, winner, you: i, forfeit: !!forfeit, quit,
+        delta: 0, oldRank: prof.rank, score: room.m.score, profile: prof
+      });
+    });
+    return;
+  }
+
+  const wKey = room.users[winner].key;
+  const lKey = room.users[1 - winner].key;
+  const res = await store.record(wKey, lKey);
   await store.flush();
+
   room.users.forEach(async (u, i) => {
     const r = i === winner ? res.win : res.lose;
     u.s.leave(room.id);
     u.s.data.room = null;
     const prof = await store.profile(u.key);
-    u.s.emit('end', { winner, you: i, forfeit: !!forfeit, quit, delta: r.delta, oldRank: r.oldRank,
-                      score: room.m.score, profile: prof });
+    u.s.emit('end', {
+      winner, you: i, forfeit: !!forfeit, quit, delta: r.delta, oldRank: r.oldRank,
+      score: room.m.score, profile: prof
+    });
   });
 }
 
+// 60 FPS authoritative game loop
 let last = Date.now();
 setInterval(() => {
   const now = Date.now();
@@ -85,11 +169,32 @@ setInterval(() => {
     const ev = G.tick(room.m, room.inp, dt);
     room.inp.forEach((u) => { u.sw = u.pa = u.bl = false; });
     io.to(room.id).emit('s', { m: room.m, ev });
-    if (room.m.phase === 'over') finish(room, room.m.winner, false);
+
+    (ev || []).forEach(async (e) => {
+      if (e.t === 'extract') {
+        const u = room.users[e.i];
+        if (u) {
+          const res = await store.bankExtracted(u.key, e.points);
+          const prof = await store.profile(u.key);
+          u.s.leave(room.id);
+          u.s.data.room = null;
+          u.s.emit('end', {
+            mode: 'ffa', you: e.i, extracted: true, points: e.points,
+            delta: res ? res.delta : 0, oldRank: res ? res.oldRank : prof.rank, profile: prof
+          });
+        }
+      }
+    });
+
+    if (room.m.phase === 'over') {
+      finish(room, room.m.winner, false);
+    }
   }
 }, 1000 / 60);
 
-setInterval(() => io.emit('stats', { online: io.engine.clientsCount, queue: queue.length }), 5000);
+setInterval(() => {
+  io.emit('stats', { online: io.engine.clientsCount, queue: queue.length, ffa: ffaQueue.length });
+}, 5000);
 
 const num = (v, lo, hi) => { v = +v; return Number.isFinite(v) ? Math.max(lo, Math.min(hi, v)) : 0; };
 function limiter(max, ms) {
@@ -104,13 +209,16 @@ function ipOf(s) {
 }
 
 const authed = (s, token) => !!s.data.key && store.sessionValid(s.data.sh, s.data.key) && (token === undefined || store.tokenMatches(token, s.data.sh));
+
 function enter(s, r) {
   for (const other of io.sockets.sockets.values()) {
     if (other !== s && other.data.key === r.key) { other.emit('kicked'); other.disconnect(true); }
   }
   queue = queue.filter((q) => q.s !== s);
+  ffaQueue = ffaQueue.filter((q) => q.s !== s);
   s.data.key = r.key; s.data.sh = r.sh;
 }
+
 function handle(cb, fn) {
   if (typeof cb !== 'function') return;
   Promise.resolve().then(fn).catch((e) => { console.error(e); cb({ err: 'Server error, please try again' }); });
@@ -166,6 +274,8 @@ io.on('connection', (s) => {
     if (s.data.room) return done({ err: 'Finish your match first' });
     if (s.data.sh) store.logout(s.data.sh);
     queue = queue.filter((q) => q.s !== s);
+    ffaQueue = ffaQueue.filter((q) => q.s !== s);
+    leaveParty(s);
     s.data.key = s.data.sh = undefined;
     done({ ok: true });
   });
@@ -197,11 +307,112 @@ io.on('connection', (s) => {
 
   s.on('unqueue', () => { queue = queue.filter((q) => q.s !== s); });
 
+  s.on('queueFFA', async () => {
+    if (s.data.room || ffaQueue.some((q) => q.s === s)) return;
+    if (!authed(s)) { s.emit('unauth'); return; }
+    const p = await store.profile(s.data.key);
+    ffaQueue.push({ s, key: s.data.key, name: p.name, mmr: p.mmr, since: Date.now() });
+    tryMatch();
+  });
+
+  s.on('unqueueFFA', () => { ffaQueue = ffaQueue.filter((q) => q.s !== s); });
+
+  // ---------- Private Parties ----------
+  function broadcastParty(party) {
+    const list = party.members.map(m => ({ name: m.name, key: m.key, ready: !!m.ready }));
+    party.members.forEach(m => {
+      m.s.emit('partyUpdate', { code: party.code, host: party.host === m.key, mode: party.mode, members: list });
+    });
+  }
+
+  function leaveParty(socket) {
+    for (const [code, party] of parties.entries()) {
+      const idx = party.members.findIndex(m => m.s === socket);
+      if (idx >= 0) {
+        const leaving = party.members[idx];
+        party.members.splice(idx, 1);
+        if (party.members.length === 0) {
+          parties.delete(code);
+        } else {
+          if (party.host === leaving.key) party.host = party.members[0].key;
+          broadcastParty(party);
+        }
+        break;
+      }
+    }
+  }
+
+  s.on('partyCreate', async (d, cb) => handle(cb, async () => {
+    if (!authed(s)) { s.emit('unauth'); return cb({ err: 'Log in first' }); }
+    leaveParty(s);
+    const p = await store.profile(s.data.key);
+    const code = generatePartyCode();
+    const mode = (d && d.mode === '2v2') ? '2v2' : '1v1';
+    const party = { code, host: s.data.key, mode, members: [{ s, key: s.data.key, name: p.name, mmr: p.mmr, ready: true }] };
+    parties.set(code, party);
+    broadcastParty(party);
+    cb({ ok: true, code });
+  }));
+
+  s.on('partyJoin', async (d, cb) => handle(cb, async () => {
+    if (!authed(s)) { s.emit('unauth'); return cb({ err: 'Log in first' }); }
+    d = d || {};
+    const code = String(d.code || '').trim().toUpperCase();
+    const party = parties.get(code);
+    if (!party) return cb({ err: 'Party not found' });
+    const max = party.mode === '2v2' ? 4 : 2;
+    if (party.members.length >= max) return cb({ err: 'Party is full' });
+    leaveParty(s);
+    const p = await store.profile(s.data.key);
+    party.members.push({ s, key: s.data.key, name: p.name, mmr: p.mmr, ready: false });
+    broadcastParty(party);
+    cb({ ok: true, code });
+  }));
+
+  s.on('partySetMode', (d) => {
+    for (const party of parties.values()) {
+      if (party.host === s.data.key) {
+        party.mode = d && d.mode === '2v2' ? '2v2' : '1v1';
+        broadcastParty(party);
+        break;
+      }
+    }
+  });
+
+  s.on('partyToggleReady', () => {
+    for (const party of parties.values()) {
+      const m = party.members.find(x => x.s === s);
+      if (m) {
+        m.ready = !m.ready;
+        broadcastParty(party);
+        break;
+      }
+    }
+  });
+
+  s.on('partyStart', async (cb) => handle(cb, async () => {
+    for (const [code, party] of parties.entries()) {
+      if (party.host === s.data.key) {
+        const need = party.mode === '2v2' ? 4 : 2;
+        if (party.members.length !== need) return cb({ err: 'Need ' + need + ' players' });
+        const ready = party.members.every(m => m.ready || m.key === party.host);
+        if (!ready) return cb({ err: 'All players must be ready' });
+        parties.delete(code);
+        startRoom(party.members, party.mode, true);
+        return cb({ ok: true });
+      }
+    }
+  }));
+
+  s.on('partyLeave', () => { leaveParty(s); });
+
+  // ---------- Gameplay Inputs ----------
   s.on('in', (d) => {
     const room = s.data.room;
     if (!room || !okIn()) return;
     d = d || {};
     const u = room.inp[s.data.idx];
+    if (!u) return;
     u.x = num(d.x, -1, 1);
     u.y = num(d.y, -1, 1);
     u.aim = Number.isFinite(+d.aim) && d.aim !== null ? +d.aim : undefined;
@@ -210,7 +421,7 @@ io.on('connection', (s) => {
   s.on('act', (k) => {
     const room = s.data.room;
     if (!room || !okAct() || !['sw', 'pa', 'bl'].includes(k)) return;
-    room.inp[s.data.idx][k] = true;
+    if (room.inp[s.data.idx]) room.inp[s.data.idx][k] = true;
   });
 
   s.on('forfeit', () => {
@@ -223,6 +434,8 @@ io.on('connection', (s) => {
 
   s.on('disconnect', () => {
     queue = queue.filter((q) => q.s !== s);
+    ffaQueue = ffaQueue.filter((q) => q.s !== s);
+    leaveParty(s);
     const room = s.data.room;
     if (room) finish(room, 1 - s.data.idx, true, s.data.idx);
   });

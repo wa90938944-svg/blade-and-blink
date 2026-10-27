@@ -222,6 +222,26 @@ function createStore(uri) {
     return { win: { delta: WIN_MMR, oldRank: wr }, lose: { delta: LOSS_MMR, oldRank: lr } };
   }
 
+  async function bankExtracted(key, points) {
+    if (!points || points <= 0) return null;
+    await waitForDb();
+    const user = await users.findOne({ key });
+    if (!user) return null;
+    const oldMmr = user.mmr;
+    const oldRank = rankOf(oldMmr);
+    const delta = Math.floor(points / 10);
+    const newMmr = oldMmr + delta;
+    const newPeak = Math.max(user.peak || START_MMR, newMmr);
+    const earned = unlocksFor(newPeak);
+    const newUnlocked = Array.from(new Set((Array.isArray(user.unlocked) ? user.unlocked : []).concat(earned)));
+
+    await users.updateOne({ key }, {
+      $inc: { mmr: delta },
+      $set: { peak: newPeak, unlocked: newUnlocked, seen: Date.now() }
+    });
+    return { delta: delta, oldRank: oldRank, newMmr: newMmr };
+  }
+
   async function top(n) {
     await waitForDb();
     const list = await users.find({ games: { $gt: 0 } })
@@ -241,7 +261,7 @@ function createStore(uri) {
     return true;
   }
 
-  return { register, login, resume, claim, sessionValid, tokenMatches, logout, saveData, equip, profile, record, top, flush };
+  return { register, login, resume, claim, sessionValid, tokenMatches, logout, saveData, equip, profile, record, bankExtracted, top, flush };
 }
 
 module.exports = { createStore, rankOf, normalizeName, START_MMR, WIN_MMR, LOSS_MMR, RANK_NAMES, COSMETICS, topLook };
