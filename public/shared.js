@@ -23,7 +23,7 @@
       pa: -1, bc: 0, sc: 0, bw: 0, bdx: 0, bdy: 0, dead: false, ix: 0, iy: 0,
       spd: cfg.spd, team: team !== undefined ? team : i, extract: 0, points: 0,
       kills: 0, parries: 0, blinks: 0, god: false, noCd: false, fast: false, isMinion: false,
-      shield: false, combatTimer: 0, isLeader: false,
+      shield: false, combatTimer: 0, isLeader: false, extracted: false,
       ownerIdx: -1, at: 0, ax: 0, ay: 0,
       tier: tier, lives: cfg.lives, maxLives: cfg.lives, hearts: cfg.maxHearts, maxHearts: cfg.maxHearts,
       reach: cfg.reach, scale: scale, r: R * scale, unparryable: false,
@@ -346,7 +346,6 @@
     }
   }
 
-  // 1. Novice CPU
   function aiNovice(m, b, dt) {
     var a = m.p[0], o = {};
     b.at -= dt;
@@ -370,7 +369,6 @@
     return o;
   }
 
-  // 2. Veteran CPU
   function aiVeteran(m, b, dt) {
     var a = m.p[0], o = {};
     b.at -= dt;
@@ -402,7 +400,6 @@
     return o;
   }
 
-  // 3. Apex CPU
   function aiApex(m, b, dt) {
     var a = m.p[0], o = {};
     b.at -= dt;
@@ -435,7 +432,6 @@
     return o;
   }
 
-  // 4. Secret Boss: "Tetanus"
   function aiTetanus(m, b, dt) {
     var a = m.p[0], o = {};
     if (!a || a.dead) return { x: 0, y: 0 };
@@ -596,6 +592,7 @@
           p.extract += dt;
           if (p.extract >= EXTRACT_TIME) {
             p.dead = true;
+            p.extracted = true;
             ev.push({ t: 'extract', i: p.i, points: p.points || 0, kills: p.kills || 0 });
           }
         } else {
@@ -651,7 +648,9 @@
       m.p.forEach(function (c) {
         if (c && c.dead && !c.rip) {
           c.rip = true;
-          ev.push({ t: 'kill', i: c.i, x: c.x, y: c.y });
+          if (!c.extracted) {
+            ev.push({ t: 'kill', i: c.i, x: c.x, y: c.y });
+          }
         }
       });
       return;

@@ -2,7 +2,8 @@
 const { MongoClient } = require('mongodb');
 const crypto = require('crypto');
 
-const START_MMR = 300, WIN_MMR = 25, LOSS_MMR = 20;
+// Changed LOSS_MMR to 0 so players lose no MMR on a ranked loss
+const START_MMR = 300, WIN_MMR = 25, LOSS_MMR = 0;
 const RESERVED = new Set(['bot', 'bots', 'you', 'p1', 'p2', 'admin', 'server', 'system', '__proto__']);
 const OWNER_NAME = 'MASTERTETANUS';
 const OWNER_KEY = 'mastertetanus';
@@ -174,7 +175,7 @@ function createStore(uri) {
     await waitForDb();
     const w = await users.findOne({ key: winKey });
     const l = await users.findOne({ key: loseKey });
-    if (!w || !l) return { win: { delta: WIN_MMR, oldRank: rankOf(START_MMR, '') }, lose: { delta: LOSS_MMR, oldRank: rankOf(START_MMR, '') } };
+    if (!w || !l) return { win: { delta: WIN_MMR, oldRank: rankOf(START_MMR, '') }, lose: { delta: -LOSS_MMR, oldRank: rankOf(START_MMR, '') } };
     const w0 = w.mmr, l0 = l.mmr, wr = rankOf(w0, w.name), lr = rankOf(l0, l.name);
     const newWMMR = w0 + WIN_MMR;
     const newPeak = Math.max(w.peak || START_MMR, newWMMR);
@@ -182,16 +183,20 @@ function createStore(uri) {
     const newUnlocked = isOwnerAccount(w.name) ? ALL_LOOKS.slice() : Array.from(new Set((Array.isArray(w.unlocked) ? w.unlocked : []).concat(earned)));
     await users.updateOne({ key: winKey }, { $inc: { mmr: WIN_MMR, wins: 1, games: 1, streak: 1 }, $set: { peak: newPeak, unlocked: newUnlocked, seen: Date.now() } });
     await users.updateOne({ key: loseKey }, { $inc: { mmr: -LOSS_MMR, losses: 1, games: 1 }, $set: { streak: 0, seen: Date.now() } });
-    return { win: { delta: WIN_MMR, oldRank: wr }, lose: { delta: LOSS_MMR, oldRank: lr } };
+    // Note: delta is properly negated here to fix the +20 MMR bug on losses
+    return { win: { delta: WIN_MMR, oldRank: wr }, lose: { delta: -LOSS_MMR, oldRank: lr } };
   }
 
   async function bankExtracted(key, points, kills) {
-    if (!points || points <= 0) return null;
+    if (kills === undefined) kills = 0;
     await waitForDb();
     const user = await users.findOne({ key });
     if (!user) return null;
     const oldMmr = user.mmr, oldRank = rankOf(oldMmr, user.name);
-    const delta = Math.floor(points / 25) + ((kills || 0) * 15);
+    
+    // MMR gained is strictly Kills x 40
+    const delta = kills * 40; 
+    
     if (delta <= 0) return { delta: 0, oldRank: oldRank, newMmr: oldMmr };
     const newMmr = oldMmr + delta, newPeak = Math.max(user.peak || START_MMR, newMmr);
     const earned = unlocksFor(newPeak, user.name);

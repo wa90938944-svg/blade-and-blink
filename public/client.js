@@ -582,7 +582,7 @@
       var el = document.createElement('div');
       el.className = 'chat-msg';
       var nameSpan = document.createElement('b');
-      nameSpan.textContent = d.name + ':';
+      nameSpan.textContent = d.name + ' ';
       el.appendChild(nameSpan);
       var textSpan = document.createElement('span');
       textSpan.textContent = d.msg;
@@ -598,6 +598,43 @@
         }
       }, 8000);
     });
+
+    sock.on('end', function (d) {
+      mode = null;
+      if (d.profile) setProfile(d.profile);
+      if (d.mode === 'ffa') {
+        if (d.extracted) {
+          result('Extracted!', 'Secured ' + (d.kills || 0) + ' Kills.', 'Banked to rank: ' + (d.delta > 0 ? '+' : '') + d.delta + ' MMR', (d.delta > 0 ? '+' : '') + d.delta + ' MMR', 'win');
+        } else {
+          var penaltyTxt = (d.delta && d.delta < 0) ? 'Penalty applied for dying with under 5 kills.' : 'All unbanked Essence was lost.';
+          result('Defeated', 'You failed to extract.', penaltyTxt, d.delta ? d.delta + ' MMR' : '', 'lose');
+        }
+        return;
+      }
+      var won = d.winner === (d.mode === '2v2' ? teams[me] : d.you);
+      var why = d.forfeit ? (d.quit === d.you ? 'You forfeited. ' : 'Opponent forfeited. ') : '';
+      var line = (d.profile ? d.profile.rank + ', ' + d.profile.mmr + ' MMR' : '');
+      if (d.unranked) line = 'Unranked Private Match';
+      var deltaStr = d.delta ? (d.delta > 0 ? '+' + d.delta + ' MMR' : d.delta + ' MMR') : (won ? '' : '0 MMR'); 
+      if (!won && d.delta === 0) deltaStr = '0 MMR'; 
+      result(won ? 'Victory' : 'Defeat', why + (d.score ? names[0] + ' ' + d.score[0] + ' - ' + d.score[1] + ' ' + names[1] : ''),
+        line, deltaStr, won ? 'win' : 'lose');
+    });
+    sock.on('kicked', function () { toLogin('You have been disconnected.'); });
+    sock.on('unauth', function () { setToken(''); toLogin('Your session ended, please log in again.'); });
+    sock.on('disconnect', function () {
+      if (mode === 'online' || mode === 'ffa' || mode === '2v2') { mode = null; result('Disconnected', 'Lost connection to server.', '', '', 'lose'); }
+    });
+    sock.on('stats', function (d) {
+      document.querySelectorAll('.stats').forEach(function (e) {
+        e.textContent = d.online + ' online, ' + d.queue + ' ranked, ' + (d.ffa || 0) + ' extraction';
+      });
+    });
+    setInterval(function () {
+      if (!sock.connected) return;
+      var t = Date.now();
+      sock.volatile.emit('pg', function () { $('ping').textContent = (Date.now() - t) + ' ms'; });
+    }, 2000);
   }
 
   // ---------- Admin Panel Interactions ----------
@@ -836,231 +873,6 @@
     });
   };
   $('admAnnounceText').addEventListener('keydown', function(e) { if (e.key === 'Enter') $('admAnnounceBtn').click(); });
-
-  // ---------- Look Picker ----------
-  $('lookbtn').onclick = function () { renderLooks(); show('wardrobe'); };
-  $('lookback').onclick = showLobby;
-  function renderLooks() {
-    var grid = $('lookgrid'), unlocked = (prof && prof.unlocked) || [], cur = prof && prof.equipped && prof.equipped.look;
-    while (grid.firstChild) grid.removeChild(grid.firstChild);
-    LOOKS.forEach(function (L) {
-      var open = (prof && prof.isOwner) || unlocked.indexOf(L.id) >= 0;
-      var b = document.createElement('button'), pv = document.createElement('canvas'), nm = document.createElement('span'), sm = document.createElement('small');
-      b.className = 'look' + (L.id === cur ? ' sel' : '');
-      b.disabled = !open;
-      b.title = open ? L.desc : 'Reach ' + L.need + ' to unlock this look';
-      pv.width = 72; pv.height = 72;
-      var g = pv.getContext('2d');
-      g.fillStyle = PAPER; g.fillRect(0, 0, 72, 72);
-      g.globalAlpha = open ? 1 : 0.3;
-      g.save(); g.translate(36, 38); g.scale(1.3, 1.3);
-      drawFighter(g, L.id, 0, 0, COL[0], -0.6, performance.now());
-      g.restore(); g.globalAlpha = 1;
-      nm.textContent = L.name;
-      sm.textContent = L.id === cur ? 'Equipped' : open ? (prof && prof.isOwner ? 'Unlocked (Owner)' : 'Unlocked') : 'Reach ' + L.need;
-      b.appendChild(pv); b.appendChild(nm); b.appendChild(sm);
-      b.onclick = function () { equipLook(L.id); };
-      grid.appendChild(b);
-    });
-    var now = LOOKS.filter(function (L) { return L.id === cur; })[0];
-    $('lookinfo').textContent = now ? now.name + ': ' + now.desc : '';
-  }
-  function equipLook(id) {
-    if (!sock || !prof) return;
-    sock.emit('equip', { look: id }, function (r) {
-      if (r && r.ok) { setProfile(r.profile); renderLooks(); }
-      else toast('Could not equip look', true);
-    });
-  }
-  $('mute').onclick = function () { Sfx.toggle(); syncMute(); };
-  function syncMute() { $('mute').textContent = Sfx.isOn() ? 'Sound on' : 'Sound off'; }
-  if (typeof Sfx !== 'undefined') syncMute();
-
-  function renderBoard(rows) {
-    var ol = $('boardlist');
-    while (ol.firstChild) ol.removeChild(ol.firstChild);
-    if (!rows.length) {
-      var e = document.createElement('li'); e.textContent = 'No ranked games played yet'; ol.appendChild(e); return;
-    }
-    rows.forEach(function (r, i) {
-      var li = document.createElement('li'), a = document.createElement('span'), b = document.createElement('span');
-      a.textContent = (i + 1) + '. ' + (r.isOwner ? '[OWNER] ' : '') + r.name;
-      b.textContent = r.rank + '  ' + r.mmr;
-      if (prof && r.name === prof.name) li.className = 'me';
-      li.appendChild(a); li.appendChild(b); ol.appendChild(li);
-    });
-  }
-
-  function enterQueue() {
-    lastKind = 'online'; qT = 0; isBossEncounter = false;
-    $('qt').textContent = '0:00';
-    show('queue');
-    sock.emit('queue');
-    clearInterval(qI);
-    qI = setInterval(function () {
-      qT++;
-      $('qt').textContent = Math.floor(qT / 60) + ':' + ('0' + (qT % 60)).slice(-2);
-    }, 1000);
-  }
-
-  $('forfeit').onclick = function () {
-    if (!mode) return;
-    var b = $('forfeit');
-    if (!fArm) {
-      b.textContent = 'Click again to forfeit'; b.classList.add('arm');
-      fArm = setTimeout(disarm, 3000);
-      return;
-    }
-    disarm();
-    forfeit();
-  };
-  function forfeit() {
-    if (mode === 'online' || mode === 'ffa' || mode === '2v2') { sock.emit('forfeit'); return; }
-    var k = mode; mode = null; isBossEncounter = false; bossDialogueT = 0;
-    if (k === 'endless') endResult('Run ended');
-    else if (k === 'bot') result('You forfeited', names[1] + ' takes the win.', '', '', 'lose');
-    else result('Match abandoned', names[0] + ' ' + M.score[0] + ' - ' + M.score[1] + ' ' + names[1], '', '');
-  }
-
-  function beginView() {
-    fx = []; snap = true; lastPhase = ''; lastScore = [0, 0]; msgT = 0;
-    shake = punch = flash = freeze = 0;
-    cam.x = W / 2; cam.y = H / 2;
-    inkX.clearRect(0, 0, W, H);
-    show(null); hud();
-  }
-
-  function decorateTetanusArena() {
-    for (var s = 0; s < 14; s++) {
-      var bx = 60 + Math.random() * (W - 120);
-      var by = 50 + Math.random() * (H - 100);
-      splat(bx, by, '#5c0a06', 14 + Math.random() * 18);
-      stain(bx, by, '#4a0704', 12, 36);
-    }
-    bossDialogueT = 2.6;
-    shake = 16;
-    snd('gong');
-  }
-
-  function triggerTetanusAmbush() {
-    apexConquered = false;
-    isBossEncounter = true;
-    selectedTier = 'tetanus';
-    M = S.create(1, '1v1', 'tetanus');
-    names = ['You', 'TETANUS'];
-    disp = [];
-    snap = true;
-    lastPhase = '';
-    lastScore = [0, 0];
-    decorateTetanusArena();
-    hud();
-  }
-
-  function startBotDuel(tier) {
-    selectedTier = tier;
-    lastKind = 'bot';
-    var activeTier = tier;
-    isBossEncounter = (tier === 'tetanus');
-
-    if (tier === 'novice' && apexConquered && Math.random() < 0.25) {
-      activeTier = 'tetanus';
-      isBossEncounter = true;
-      apexConquered = false;
-    }
-
-    mode = 'bot'; vs = null; me = 0;
-    var botLook = activeTier === 'apex' ? 'platinum' : (activeTier === 'veteran' ? 'gold' : 'bronze');
-    looks = [(prof && prof.equipped && prof.equipped.look) || 'none', botLook];
-    teams = [0, 1];
-    M = S.create(1, '1v1', activeTier);
-    var label = isBossEncounter ? 'TETANUS' : (activeTier.charAt(0).toUpperCase() + activeTier.slice(1) + ' CPU');
-    names = ['You', label];
-    disp = [];
-    beginView();
-
-    if (isBossEncounter) {
-      decorateTetanusArena();
-    }
-  }
-
-  function startLocal(k) {
-    lastKind = k; mode = k; vs = null; me = 0; isBossEncounter = false; bossDialogueT = 0;
-    looks = [(prof && prof.equipped && prof.equipped.look) || 'none', 'none'];
-    teams = [0, 1];
-    M = k === 'endless' ? S.createEndless() : S.create(4, '1v1', 'player');
-    names = k === 'endless' ? ['You', 'Bots'] : ['P1', 'P2'];
-    disp = [];
-    beginView();
-  }
-
-  if (sock) {
-    var resume = function (n) {
-      var t = getToken();
-      if (!t) return;
-      sock.emit('resume', { token: t }, function (r) {
-        if (r && r.ok) { setProfile(r.profile); if (cur === 'login') showLobby(); }
-        else if (r && r.legacy) { claimToken = t; setAuthMode('claim', r.name); if (cur === 'login') show('login'); }
-        else if (r && r.err) { setToken(''); if (prof || cur !== 'login') toLogin(r.err || 'Session ended'); }
-        else if (n < 5) setTimeout(function () { resume(n + 1); }, 2000);
-      });
-    };
-    sock.on('connect', function () { resume(0); });
-    sock.on('match', function (d) {
-      clearInterval(qI);
-      isBossEncounter = false; bossDialogueT = 0;
-      mode = d.mode === '2v2' ? '2v2' : 'online';
-      lastKind = mode; me = d.you; names = d.names; M = null;
-      vs = { ranks: d.ranks, mmrs: d.mmrs };
-      looks = d.looks || [];
-      teams = d.teams || [0, 1];
-      disp = [];
-      beginView();
-      $('rnd').textContent = d.mode === '2v2' ? '2v2 Duel' : 'Ranked';
-    });
-    sock.on('ffa_meta', function (d) {
-      if (mode !== 'ffa') return;
-      names = d.names;
-      looks = d.looks;
-      teams = d.names.map(function (_, i) { return i; });
-    });
-    sock.on('s', function (d) {
-      if (mode !== 'online' && mode !== 'ffa' && mode !== '2v2') return;
-      M = d.m; onEv(d.ev);
-    });
-    sock.on('end', function (d) {
-      mode = null;
-      if (d.profile) setProfile(d.profile);
-      if (d.mode === 'ffa') {
-        if (d.extracted) {
-          result('Extracted!', 'Secured ' + d.points + ' Ink Essence.', 'Banked to rank: ' + (d.delta > 0 ? '+' : '') + d.delta + ' MMR', (d.delta > 0 ? '+' : '') + d.delta + ' MMR', 'win');
-        } else {
-          result('Defeated', 'You failed to extract.', 'All unbanked Ink Essence was lost in the arena.', '', 'lose');
-        }
-        return;
-      }
-      var won = d.winner === (d.mode === '2v2' ? teams[me] : d.you);
-      var why = d.forfeit ? (d.quit === d.you ? 'You forfeited. ' : 'Opponent forfeited. ') : '';
-      var line = (d.profile ? d.profile.rank + ', ' + d.profile.mmr + ' MMR' : '');
-      if (d.unranked) line = 'Unranked Private Match';
-      result(won ? 'Victory' : 'Defeat', why + (d.score ? names[0] + ' ' + d.score[0] + ' - ' + d.score[1] + ' ' + names[1] : ''),
-        line, d.delta ? (d.delta > 0 ? '+' : '') + d.delta + ' MMR' : '', won ? 'win' : 'lose');
-    });
-    sock.on('kicked', function () { toLogin('You have been disconnected.'); });
-    sock.on('unauth', function () { setToken(''); toLogin('Your session ended, please log in again.'); });
-    sock.on('disconnect', function () {
-      if (mode === 'online' || mode === 'ffa' || mode === '2v2') { mode = null; result('Disconnected', 'Lost connection to server.', '', '', 'lose'); }
-    });
-    sock.on('stats', function (d) {
-      document.querySelectorAll('.stats').forEach(function (e) {
-        e.textContent = d.online + ' online, ' + d.queue + ' ranked, ' + (d.ffa || 0) + ' extraction';
-      });
-    });
-    setInterval(function () {
-      if (!sock.connected) return;
-      var t = Date.now();
-      sock.volatile.emit('pg', function () { $('ping').textContent = (Date.now() - t) + ' ms'; });
-    }, 2000);
-  }
 
   // ---------- Paper layers ----------
   function mkCanvas() { var c = document.createElement('canvas'); c.width = W; c.height = H; return c; }
