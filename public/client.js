@@ -1007,7 +1007,7 @@
     sock.on('connect', function () { resume(0); });
     sock.on('match', function (d) {
       clearInterval(qI);
-      isBossEncounter = false bossDialogueT = 0;
+      isBossEncounter = false; bossDialogueT = 0;
       mode = d.mode === '2v2' ? '2v2' : 'online';
       lastKind = mode; me = d.you; names = d.names; M = null;
       vs = { ranks: d.ranks, mmrs: d.mmrs };
