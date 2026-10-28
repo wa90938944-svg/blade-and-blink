@@ -32,7 +32,7 @@
   var TRAIL_TINT = { silver: '#d6d2c8', gold: '#e5b842', platinum: '#c9331f' };
   var looks = ['none', 'none'];
   var teams = [0, 1];
-  var godActive = false, noCdActive = false;
+  var godActive = false, noCdActive = false, fastActive = false;
 
   var selectedTier = 'novice';
   var apexConquered = false;
@@ -565,6 +565,16 @@
       $('partystart').hidden = !d.host;
       $('partyready').textContent = d.host ? 'Ready (Host)' : 'Toggle Ready';
     });
+    
+    sock.on('announcement', function (msg) {
+      var banner = $('announcement');
+      if (banner) {
+        banner.textContent = msg;
+        banner.classList.add('show');
+        snd('gong');
+        setTimeout(function () { banner.classList.remove('show'); }, 6000);
+      }
+    });
   }
 
   // ---------- Admin Panel Interactions ----------
@@ -573,8 +583,10 @@
     var inMatch = !!mode;
     $('adminMatchTools').hidden = !inMatch;
     $('adminMenuTools').hidden = inMatch;
+    
+    // Only display owner cheats if the player is actually the owner
     $('ownerCheats').style.display = (inMatch && prof.isOwner) ? 'flex' : 'none';
-    $('admBecomeTetanus').style.display = (inMatch && prof.isOwner) ? 'block' : 'none';
+    
     if (!inMatch) {
       $('admSearch').value = '';
       loadAdminUserList('');
@@ -681,6 +693,23 @@
   }
 
   $('admSpawnGuard').onclick = spawnGuardCmd;
+  
+  function cleanBotsCmd() {
+    if (!prof || (!prof.isOwner && !prof.isAdmin) || !mode || !M) return;
+    if (mode === 'bot' || mode === 'local' || mode === 'endless') {
+      let count = 0;
+      M.p.forEach(function (p) {
+        if (p && !p.dead && p.isMinion) { p.dead = true; p.lives = 0; p.hearts = 0; count++; }
+      });
+      toast('Cleaned ' + count + ' bots');
+      return;
+    }
+    sock.emit('admin_clean_bots', function (r) {
+      if (r && r.ok) toast('Cleaned ' + r.count + ' bots');
+    });
+  }
+  
+  $('admCleanBots').onclick = cleanBotsCmd;
 
   $('admKillAll').onclick = function () {
     if (mode === 'bot' || mode === 'local' || mode === 'endless') {
@@ -736,6 +765,25 @@
     });
   };
   
+  $('admFast').onclick = function () {
+    if (mode === 'bot' || mode === 'local' || mode === 'endless') {
+      if (M && M.p[0]) {
+        M.p[0].fast = !M.p[0].fast;
+        fastActive = M.p[0].fast;
+        $('admFast').textContent = 'Super Speed: ' + (fastActive ? 'ON' : 'OFF');
+        $('admFast').style.color = fastActive ? 'var(--gold)' : 'var(--bone)';
+        toast('Super Speed ' + (fastActive ? 'Enabled' : 'Disabled'));
+      }
+      return;
+    }
+    sock.emit('admin_match_toggle_fast', function (r) {
+      fastActive = r.fast;
+      $('admFast').textContent = 'Super Speed: ' + (fastActive ? 'ON' : 'OFF');
+      $('admFast').style.color = fastActive ? 'var(--gold)' : 'var(--bone)';
+      toast('Super Speed ' + (fastActive ? 'Enabled' : 'Disabled'));
+    });
+  };
+
   $('admBecomeTetanus').onclick = function () {
     if (!prof || !prof.isOwner) return;
     if (mode === 'bot' || mode === 'local' || mode === 'endless') {
@@ -753,6 +801,18 @@
       if (r && r.ok) toast('You are now Tetanus!');
     });
   };
+  
+  $('admAnnounceBtn').onclick = function() {
+    var msg = $('admAnnounceText').value.trim();
+    if (!msg) return;
+    sock.emit('admin_announce', { message: msg }, function(r) {
+      if (r && r.ok) {
+        toast('Announcement sent');
+        $('admAnnounceText').value = '';
+      }
+    });
+  };
+  $('admAnnounceText').addEventListener('keydown', function(e) { if (e.key === 'Enter') $('admAnnounceBtn').click(); });
 
   // ---------- Look Picker ----------
   $('lookbtn').onclick = function () { renderLooks(); show('wardrobe'); };
@@ -1161,6 +1221,10 @@
     if (k === 'm' && typeof Sfx !== 'undefined') { Sfx.toggle(); syncMute(); return; }
     if (k === 'p' && prof && (prof.isOwner || prof.isAdmin) && mode) {
       spawnGuardCmd();
+      return;
+    }
+    if (k === 'o' && prof && (prof.isOwner || prof.isAdmin) && mode) {
+      cleanBotsCmd();
       return;
     }
     if (mode && (k.indexOf('Arrow') === 0 || k === ' ' || k === '/' || k === ',' || k === '.')) e.preventDefault();

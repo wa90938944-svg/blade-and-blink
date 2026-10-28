@@ -119,7 +119,7 @@ async function joinFFA(user) {
     i: slot, x: rx, y: ry, fa: Math.random() * 6.283, ch: 3, rc: 0, st: 0, sw: -1, hs: [],
     pa: -1, bc: 0, sc: 0, bw: 0, bdx: 0, bdy: 0, dead: false, ix: 0, iy: 0, spd: 200,
     team: slot, extract: 0, points: 0, kills: 0, parries: 0, blinks: 0,
-    god: false, noCd: false, isMinion: false, ownerIdx: -1, at: 0, ax: 0, ay: 0,
+    god: false, noCd: false, fast: false, isMinion: false, ownerIdx: -1, at: 0, ax: 0, ay: 0,
     r: 13, reach: 56, tier: 'player', scale: 1.0, maxLives: 1, maxHearts: 1, lives: 1, hearts: 1,
     unparryable: false, bossTelegraph: 0, isOwner: prof.isOwner, isAdmin: prof.isAdmin
   };
@@ -518,6 +518,22 @@ io.on('connection', (s) => {
       }
     });
   });
+  
+  s.on('admin_clean_bots', async (cb) => {
+    const priv = await getPriv(s);
+    const room = s.data.room;
+    if (!room || !priv.a) return;
+    let count = 0;
+    room.m.p.forEach((p) => {
+      if (p && !p.dead && p.isMinion) {
+        p.dead = true;
+        p.lives = 0;
+        p.hearts = 0;
+        count++;
+      }
+    });
+    if (typeof cb === 'function') cb({ ok: true, count });
+  });
 
   s.on('admin_match_toggle_god', async (cb) => {
     const priv = await getPriv(s);
@@ -540,6 +556,26 @@ io.on('connection', (s) => {
       if (typeof cb === 'function') cb({ noCd: p.noCd });
     }
   });
+  
+  s.on('admin_match_toggle_fast', async (cb) => {
+    const priv = await getPriv(s);
+    const room = s.data.room;
+    if (!room || !priv.o) return;
+    const p = room.m.p[s.data.idx];
+    if (p) {
+      p.fast = !p.fast;
+      if (typeof cb === 'function') cb({ fast: p.fast });
+    }
+  });
+
+  s.on('admin_announce', async (d, cb) => handle(cb, async () => {
+    const priv = await getPriv(s);
+    if (!priv.o) return cb({ err: 'Unauthorized' });
+    if (d && d.message) {
+      io.emit('announcement', d.message);
+    }
+    cb({ ok: true });
+  }));
 
   s.on('admin_spawn_bodyguard', async (cb) => {
     const priv = await getPriv(s);

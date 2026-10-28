@@ -286,6 +286,18 @@ button:focus-visible{outline:3px solid var(--gold);outline-offset:3px}
 #boardlist li.me{background:var(--panel-hi);color:var(--gold)}
 .stats{min-height:20px;font-size:14px}
 
+/* Global Announcement Banner */
+#announcement{
+  position:fixed;top:0;left:0;right:0;background:var(--redhi);color:var(--bone);
+  text-align:center;padding:12px;font:600 20px var(--disp);z-index:100;
+  box-shadow:0 4px 12px rgba(0,0,0,0.5);letter-spacing:0.05em;border-bottom:3px solid var(--bone);
+  transition:transform 0.4s cubic-bezier(0.16,1,0.3,1);
+  transform:translateY(-100%);
+}
+#announcement.show{
+  transform:translateY(0);
+}
+
 #pad{width:min(94vw,520px);display:flex;justify-content:space-between;align-items:center;gap:10px;touch-action:none;-webkit-touch-callout:none}
 #stick{position:relative;flex:none;width:clamp(104px,32vw,150px);aspect-ratio:1;border:3px solid var(--bone);border-radius:50%;background:rgba(27,24,20,.88);box-shadow:4px 4px 0 var(--red);touch-action:none}
 #stick::before,#stick::after{content:"";position:absolute;background:var(--line)}
@@ -334,6 +346,7 @@ button:focus-visible{outline:3px solid var(--gold);outline-offset:3px}
 </style>
 </head>
 <body>
+<div id="announcement"></div>
 <div id="adminbar" hidden><button id="adminbtn">ADMIN</button></div>
 <div id="wrap">
   <div id="hud"><span id="s0">P1</span><span id="rnd">Blade &amp; Blink</span><span id="s1">P2</span></div>
@@ -429,13 +442,22 @@ button:focus-visible{outline:3px solid var(--gold);outline-offset:3px}
         <div id="adminMatchTools" hidden style="width:100%;display:flex;flex-direction:column;gap:8px">
           <p style="color:var(--redhi);font-weight:700">IN-MATCH CHEATS</p>
           <button class="sec" id="admSpawnGuard" style="background:#b8891f;color:#000;border-color:var(--bone)">Spawn CPU Bodyguard (P)</button>
+          <button class="sec" id="admCleanBots" style="background:#8b8b8b;color:#000;border-color:var(--bone)">Clean Spawned Bots (O)</button>
           <button id="admKillAll" style="background:#8b0000;border-color:#ff4444">Instant Kill Enemies</button>
           
-          <div id="ownerCheats" class="row" style="display:none;margin-top:8px">
-            <button class="sec" id="admGod">Invulnerability: OFF</button>
-            <button class="sec" id="admNoCd">No Cooldowns: OFF</button>
+          <div id="ownerCheats" style="display:none;flex-direction:column;gap:8px;margin-top:8px">
+            <p style="color:var(--gold);font-weight:700;margin:0">OWNER CHEATS</p>
+            <div class="row">
+              <button class="sec" id="admGod">Invulnerability: OFF</button>
+              <button class="sec" id="admNoCd">No Cooldowns: OFF</button>
+            </div>
+            <button class="sec" id="admFast">Super Speed: OFF</button>
+            <button id="admBecomeTetanus" style="background:#680c07;color:var(--bone);border-color:#c9331f;">Become Tetanus</button>
+            <div class="row">
+              <input id="admAnnounceText" placeholder="Server Announcement...">
+              <button class="sec" id="admAnnounceBtn" style="width:auto">Send</button>
+            </div>
           </div>
-          <button id="admBecomeTetanus" style="display:none;background:#680c07;color:var(--bone);border-color:#c9331f;margin-top:8px">Become Tetanus</button>
         </div>
         
         <div id="adminMenuTools" style="width:100%;display:flex;flex-direction:column;gap:8px">

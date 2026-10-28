@@ -4,7 +4,7 @@
   var W = 640, H = 400, R = 13, PAR = 0.35, A0 = 0.08, A1 = 0.22;
   var FFA_W = 1800, FFA_H = 1200;
   var REACH = 56, BLINK_D = 120, BLINK_REC = 0.3, CHARGE_T = 3.5, SPAWN_T = 5, SWING_CD = 0.2, BLINK_WIND = 0.1;
-  var SHRINE_R = 36, EXTRACT_TIME = 3.0;
+  var SHRINE_R = 36, EXTRACT_TIME = 1.5; // Reduced from 3.0 for smaller map pacing
 
   var TIERS = {
     player:  { lives: 1, maxHearts: 1, spd: 200, reach: REACH, scale: 1.0 },
@@ -22,7 +22,7 @@
       i: i, x: x, y: y === undefined ? H / 2 : y, fa: fa, ch: 3, rc: 0, st: 0, sw: -1, hs: [],
       pa: -1, bc: 0, sc: 0, bw: 0, bdx: 0, bdy: 0, dead: false, ix: 0, iy: 0,
       spd: cfg.spd, team: team !== undefined ? team : i, extract: 0, points: 0,
-      kills: 0, parries: 0, blinks: 0, god: false, noCd: false, isMinion: false,
+      kills: 0, parries: 0, blinks: 0, god: false, noCd: false, fast: false, isMinion: false,
       ownerIdx: -1, at: 0, ax: 0, ay: 0,
       tier: tier, lives: cfg.lives, maxLives: cfg.lives, hearts: cfg.maxHearts, maxHearts: cfg.maxHearts,
       reach: cfg.reach, scale: scale, r: R * scale, unparryable: false,
@@ -547,7 +547,8 @@
       }
       if (l > 0) {
         var parrySlow = (parrying(p) && p.tier !== 'apex') ? 0.5 : 1;
-        var sp = p.spd * (p.sw >= 0 ? 0.6 : 1) * parrySlow * (p.bw > 0 ? 0.3 : 1);
+        // Apply 2.5x speed multiplier if the fast cheat is toggled on
+        var sp = p.spd * (p.sw >= 0 ? 0.6 : 1) * parrySlow * (p.bw > 0 ? 0.3 : 1) * (p.fast ? 2.5 : 1);
         p.x = cl(p.x + p.ix * sp * dt, p.r, bW - p.r);
         p.y = cl(p.y + p.iy * sp * dt, p.r, bH - p.r);
         p.extract = 0;
