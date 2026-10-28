@@ -38,7 +38,6 @@
     var t = l ? cl(((px - ax) * vx + (py - ay) * vy) / l, 0, 1) : 0;
     return Math.hypot(ax + vx * t - px, ay + vy * t - py);
   }
-  // A stunned fighter cannot parry
   function parrying(p) { return p.st <= 0 && p.pa >= 0 && p.pa < PAR; }
 
   function reset(m) {
@@ -505,7 +504,7 @@
     if (m.ffa) {
       updateShrines(m, dt, ev);
       
-      let maxKills = 0, leaderIdx = -1;
+      var maxKills = 0, leaderIdx = -1;
       for (i = 0; i < n; i++) {
         p = m.p[i]; if (!p || p.dead || p.isMinion) continue;
         if (p.kills > maxKills) { maxKills = p.kills; leaderIdx = i; }
