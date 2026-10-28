@@ -129,7 +129,7 @@ async function joinFFA(user) {
     i: slot, x: rx, y: ry, fa: Math.random() * 6.283, ch: 3, rc: 0, st: 0, sw: -1, hs: [],
     pa: -1, bc: 0, sc: 0, bw: 0, bdx: 0, bdy: 0, dead: false, ix: 0, iy: 0, spd: 200,
     team: slot, extract: 0, points: 0, kills: 0, parries: 0, blinks: 0,
-    god: false, noCd: false, fast: false, isMinion: false, shield: false, combatTimer: 0, isLeader: false, extracted: false,
+    god: false, noCd: false, fast: false, isMinion: false, shield: false, combatTimer: 0, isLeader: false,
     ownerIdx: -1, at: 0, ax: 0, ay: 0,
     r: 13, reach: 56, tier: 'player', scale: 1.0, maxLives: 1, maxHearts: 1, lives: 1, hearts: 1,
     unparryable: false, bossTelegraph: 0, isOwner: prof.isOwner, isAdmin: prof.isAdmin
@@ -162,7 +162,11 @@ function leaveFFA(user, extracted, points) {
   user.s.data.room = null;
   user.s.data.idx = undefined;
 
-  if (ffaWorld.m.p[idx]) ffaWorld.m.p[idx].dead = true;
+  if (ffaWorld.m.p[idx]) {
+    if (extracted) ffaWorld.m.p[idx].rip = true; // Prevents the phantom death event in the engine loop
+    ffaWorld.m.p[idx].dead = true;
+  }
+  
   ffaWorld.users[idx] = null;
   ffaWorld.meta[idx] = null;
 
@@ -229,7 +233,7 @@ setInterval(() => {
           leaveFFA(u, true, e.points);
           u.s.emit('end', {
             mode: 'ffa', you: e.i, extracted: true, points: e.points, kills: kills,
-            delta: res ? res.delta : 0, oldRank: res ? res.oldRank : prof.rank, profile: prof
+            delta: kills * 40, oldRank: res ? res.oldRank : prof.rank, profile: prof
           });
         }
       } else if (e.t === 'kill' && room.ffa) {
@@ -242,7 +246,7 @@ setInterval(() => {
           leaveFFA(victim, false, 0);
           victim.s.emit('end', {
             mode: 'ffa', you: e.i, extracted: false, points: 0, kills: kills,
-            delta: res.delta, oldRank: res.oldRank || prof.rank, profile: prof
+            delta: kills < 5 ? -150 : (res ? res.delta : 0), oldRank: res ? res.oldRank || prof.rank : prof.rank, profile: prof
           });
         }
       }
@@ -652,7 +656,7 @@ io.on('connection', (s) => {
     if (typeof d !== 'string' || !d.trim()) return;
     const msg = d.trim().substring(0, 80);
     const p = await store.profile(s.data.key);
-    io.to(room.id).emit('chat_msg', { name: `[${p.name}]`, msg: msg, i: s.data.idx });
+    io.to(room.id).emit('chat_msg', { name: p.name, msg: msg, i: s.data.idx });
   });
 
   s.on('forfeit', () => {
