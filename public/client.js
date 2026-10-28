@@ -19,7 +19,6 @@
     { n: 'Admin', min: 9999, next: 9999, c: '#8fbfb4' },
     { n: 'Owner', min: 9999, next: 9999, c: '#e2503a' }
   ];
-  var RANK_NAMES = RANKS.map(function (r) { return r.n; });
 
   var BONE = '#efe6d2';
   var LOOKS = [
@@ -569,143 +568,199 @@
     });
   }
 
-  // ---------- Admin Panel Interactions ----------
+  // ==========================================
+  // MULTI-PAGE ADMIN & CHEAT SYSTEM
+  // ==========================================
+  var managedUser = null;
+
   $('adminbtn').onclick = function () {
     if (!prof || (!prof.isOwner && !prof.isAdmin)) return;
-    var inMatch = !!mode;
-    $('admTabs').hidden = inMatch;
-    $('admCheatsSection').hidden = !inMatch;
-    $('admDbSection').hidden = inMatch;
-    $('admReportsSection').hidden = true;
-    $('admOwnerCheats').hidden = !prof.isOwner;
-
-    if (!inMatch) {
-      document.querySelectorAll('.adm-tab').forEach(function(e) { e.classList.remove('active'); });
-      $('tabDb').classList.add('active');
-      $('admSearch').value = '';
-      loadAdminUserList();
+    if (mode) {
+      $('admOwnerCheats').hidden = !prof.isOwner;
+      show('admincheats');
+    } else {
+      show('adminhub');
     }
-    show('adminpanel');
   };
+  $('adminHubClose').onclick = function () { showLobby(); };
+  $('cheatsClose').onclick = function () { show(null); };
 
-  $('adminClose').onclick = function () {
-    if (mode) show(null); else showLobby();
+  // Hub Navigation
+  $('navDb').onclick = function () {
+    $('admSearch').value = '';
+    show('admindb');
+    loadAdminUserList();
   };
+  $('navLedger').onclick = function () {
+    show('adminledger');
+    loadAdminReports();
+  };
+  $('dbBack').onclick = function () { show('adminhub'); };
+  $('ledgerBack').onclick = function () { show('adminhub'); };
+  $('mgrBack').onclick = function () { show('admindb'); };
 
-  ['Db', 'Reports', 'Cheats'].forEach(function(id) {
-    $('tab' + id).onclick = function() {
-      document.querySelectorAll('.adm-tab').forEach(function(e) { e.classList.remove('active'); });
-      $('tab' + id).classList.add('active');
-      $('admDbSection').hidden = (id !== 'Db');
-      $('admReportsSection').hidden = (id !== 'Reports');
-      $('admCheatsSection').hidden = (id !== 'Cheats');
-      if (id === 'Db') loadAdminUserList();
-      if (id === 'Reports') loadAdminReports();
-    };
-  });
-
-  $('admSearch').oninput = function() {
+  $('admSearch').oninput = function () {
     var q = this.value.toLowerCase();
-    document.querySelectorAll('.adm-user-row').forEach(function(row) {
+    document.querySelectorAll('.adm-li').forEach(function (row) {
       row.style.display = row.innerText.toLowerCase().includes(q) ? '' : 'none';
     });
   };
 
   function loadAdminUserList() {
     var list = $('adminUserList');
-    list.innerHTML = '<div style="padding:10px;text-align:center">Loading...</div>';
+    list.innerHTML = '<li style="padding:10px;text-align:center">Loading...</li>';
     sock.emit('admin_get_users', function (r) {
-      if (!r || !r.ok) { list.innerHTML = '<div style="padding:10px;color:var(--redhi)">Failed to load data</div>'; return; }
+      if (!r || !r.ok) { list.innerHTML = '<li style="padding:10px;color:var(--redhi)">Failed to load data</li>'; return; }
       list.innerHTML = '';
       r.users.forEach(function (u) {
-        var row = document.createElement('div');
-        row.className = 'adm-user-row';
+        var li = document.createElement('li');
+        li.className = 'adm-li';
         var tags = '';
         if (u.isOwner) tags += '<span class="tag tag-owner">OWNER</span>';
         if (u.isAdmin) tags += '<span class="tag tag-admin">ADMIN</span>';
         if (u.banned) tags += '<span class="tag tag-banned">BANNED</span>';
         
-        var top = '<div class="adm-user-header"><b>' + u.name + tags + '</b> <span>' + u.rank + ' (' + u.mmr + ')</span></div>';
-        var tools = '<div class="adm-user-tools">';
-
-        if (prof.isOwner) {
-          tools += '<input type="number" id="mmr_' + u.key + '" value="' + u.mmr + '" title="MMR">';
-          tools += '<button class="sec" id="setmmr_' + u.key + '">Save MMR</button>';
-          if (!u.isOwner) {
-            tools += '<button class="sec" id="prom_' + u.key + '">' + (u.isAdmin ? 'Demote Admin' : 'Make Admin') + '</button>';
-          }
-        }
-        if (!u.isOwner && (prof.isOwner || (prof.isAdmin && !u.isAdmin))) {
-          if (u.banned) {
-            tools += '<button style="background:var(--gold);color:#000" id="ban_' + u.key + '">Unban</button>';
-          } else {
-            tools += '<input type="text" id="banr_' + u.key + '" placeholder="Ban reason...">';
-            tools += '<button style="background:var(--redhi)" id="ban_' + u.key + '">Ban</button>';
-          }
-        }
-        tools += '</div>';
-        row.innerHTML = top + tools;
-        list.appendChild(row);
-
-        var btnMmr = row.querySelector('#setmmr_' + u.key);
-        if (btnMmr) btnMmr.onclick = function () {
-          sock.emit('admin_set_mmr', { key: u.key, mmr: row.querySelector('#mmr_' + u.key).value }, loadAdminUserList);
-        };
-        var btnProm = row.querySelector('#prom_' + u.key);
-        if (btnProm) btnProm.onclick = function () {
-          sock.emit('owner_set_admin', { key: u.key, isAdmin: !u.isAdmin }, loadAdminUserList);
-        };
-        var btnBan = row.querySelector('#ban_' + u.key);
-        if (btnBan) {
-          btnBan.onclick = function () {
-            var reason = u.banned ? '' : row.querySelector('#banr_' + u.key).value;
-            sock.emit('admin_set_ban', { key: u.key, banned: !u.banned, reason: reason }, function (res) {
-              if (res.err) toast(res.err, true);
-              else { toast(u.banned ? 'Unbanned' : 'Banned'); loadAdminUserList(); }
-            });
-          };
-        }
+        li.innerHTML = `
+          <div class="adm-li-info">
+            <div class="adm-li-title">${u.name}${tags}</div>
+            <div class="adm-li-sub">${u.rank} (${u.mmr} MMR)</div>
+          </div>
+          <button class="sec adm-li-btn" id="mbtn_${u.key}">Manage</button>
+        `;
+        list.appendChild(li);
+        li.querySelector('#mbtn_' + u.key).onclick = function () { openManageUser(u); };
       });
-      // trigger search filter
       $('admSearch').dispatchEvent(new Event('input'));
     });
   }
 
+  function openManageUser(u) {
+    managedUser = u;
+    var tags = '';
+    if (u.isOwner) tags += '<span class="tag tag-owner">OWNER</span>';
+    if (u.isAdmin) tags += '<span class="tag tag-admin">ADMIN</span>';
+    if (u.banned) tags += '<span class="tag tag-banned">BANNED</span>';
+
+    $('mgrName').innerHTML = u.name + tags;
+    $('mgrRank').textContent = u.rank + ' \u00B7 ' + u.mmr + ' MMR';
+    
+    $('mgrOwnerTools').hidden = !prof.isOwner;
+    $('mgrMmrInp').value = u.mmr;
+    $('mgrPromote').textContent = u.isAdmin ? 'Demote Admin' : 'Promote to Admin';
+    $('mgrPromote').disabled = u.isOwner; // Can't touch owner role
+
+    $('mgrBanReason').value = u.banReason || '';
+    
+    // Admins cannot ban Admins or Owners. Owners cannot ban themselves.
+    var canBan = true;
+    if (u.isOwner) canBan = false;
+    if (!prof.isOwner && u.isAdmin) canBan = false;
+
+    $('mgrBanArea').style.display = canBan ? 'block' : 'none';
+    $('mgrBanBtn').hidden = u.banned;
+    $('mgrUnbanBtn').hidden = !u.banned;
+
+    show('adminmanage');
+  }
+
+  $('mgrSaveMmr').onclick = function () {
+    if (!managedUser || !prof.isOwner) return;
+    var val = $('mgrMmrInp').value;
+    sock.emit('admin_set_mmr', { key: managedUser.key, mmr: val }, function (r) {
+      if (r && r.ok) {
+        toast('MMR updated to ' + r.mmr);
+        managedUser.mmr = r.mmr;
+        managedUser.rank = r.rank;
+        openManageUser(managedUser); // refresh UI
+      } else toast((r && r.err) || 'Error', true);
+    });
+  };
+
+  $('mgrPromote').onclick = function () {
+    if (!managedUser || !prof.isOwner) return;
+    sock.emit('owner_set_admin', { key: managedUser.key, isAdmin: !managedUser.isAdmin }, function (r) {
+      if (r && r.ok) {
+        toast(r.isAdmin ? 'Promoted to Admin' : 'Demoted from Admin');
+        managedUser.isAdmin = r.isAdmin;
+        openManageUser(managedUser);
+      } else toast((r && r.err) || 'Error', true);
+    });
+  };
+
+  $('mgrBanBtn').onclick = function () {
+    if (!managedUser) return;
+    var reason = $('mgrBanReason').value.trim();
+    if (reason.length < 4) return toast('Detailed reason required', true);
+    sock.emit('admin_set_ban', { key: managedUser.key, banned: true, reason: reason }, function (r) {
+      if (r && r.ok) {
+        toast('Player Banned');
+        managedUser.banned = true;
+        managedUser.banReason = reason;
+        openManageUser(managedUser);
+      } else toast((r && r.err) || 'Error', true);
+    });
+  };
+
+  $('mgrUnbanBtn').onclick = function () {
+    if (!managedUser) return;
+    sock.emit('admin_set_ban', { key: managedUser.key, banned: false, reason: '' }, function (r) {
+      if (r && r.ok) {
+        toast('Player Unbanned');
+        managedUser.banned = false;
+        managedUser.banReason = '';
+        openManageUser(managedUser);
+      } else toast((r && r.err) || 'Error', true);
+    });
+  };
+
   function loadAdminReports() {
     var list = $('adminReportsList');
-    list.innerHTML = '<div style="padding:10px;text-align:center">Loading...</div>';
+    list.innerHTML = '<div style="padding:10px;text-align:center">Loading reports...</div>';
     sock.emit('admin_get_reports', function (r) {
       if (!r || !r.ok) { list.innerHTML = '<div style="padding:10px;color:var(--redhi)">Failed to load data</div>'; return; }
       list.innerHTML = '';
-      if (r.reports.length === 0) list.innerHTML = '<div style="padding:10px;text-align:center">No active ban reports</div>';
+      if (r.reports.length === 0) list.innerHTML = '<div style="padding:10px;text-align:center;color:var(--dim)">No ban history found.</div>';
+      
       r.reports.forEach(function (rep) {
         var row = document.createElement('div');
-        row.className = 'adm-report-row';
+        row.className = 'adm-report-box';
         var date = new Date(rep.timestamp).toLocaleString();
-        var btn = rep.activeBan ? `<button class="sec" style="margin-top:4px" id="unban_${rep.id}">Unban ${rep.targetName}</button>` : `<div style="color:var(--dim);font-size:12px;margin-top:4px">Ban Lifted</div>`;
-        row.innerHTML = `<div><b style="color:var(--redhi)">${rep.targetName}</b> banned by ${rep.adminName} (${rep.adminRole})</div>
-                         <div style="font-size:12px;color:var(--dim)">${date}</div>
-                         <div style="margin-top:4px"><b>Reason:</b> ${rep.reason}</div>
-                         ${btn}`;
-        list.appendChild(row);
-        if (rep.activeBan) {
-          row.querySelector('#unban_' + rep.id).onclick = function() {
+        var roleTag = rep.adminRole === 'OWNER' ? '<span class="tag tag-owner">OWNER</span>' : '<span class="tag tag-admin">ADMIN</span>';
+        var status = rep.activeBan ? '' : '<span class="tag" style="background:#555;color:#fff">LIFTED</span>';
+        
+        row.innerHTML = `
+          <div style="font-size:16px;margin-bottom:4px"><b style="color:var(--redhi)">${rep.targetName}</b> ${status}</div>
+          <div style="font-size:13px;color:var(--dim);margin-bottom:6px">Banned by: <b>${rep.adminName}</b> ${roleTag} &middot; ${date}</div>
+          <div style="font-size:14px;background:var(--panel-hi);padding:6px;border-left:3px solid var(--redhi)">${rep.reason}</div>
+        `;
+        
+        if (rep.activeBan && (prof.isOwner || rep.adminRole !== 'OWNER')) {
+          var unbanBtn = document.createElement('button');
+          unbanBtn.className = 'sec';
+          unbanBtn.style.marginTop = '8px';
+          unbanBtn.style.padding = '4px 8px';
+          unbanBtn.style.fontSize = '13px';
+          unbanBtn.textContent = 'Unban ' + rep.targetName;
+          unbanBtn.onclick = function() {
             sock.emit('admin_set_ban', {key: rep.targetKey, banned: false}, function(res) {
               if (res.err) toast(res.err, true); else { toast('Unbanned'); loadAdminReports(); }
             });
           };
+          row.appendChild(unbanBtn);
         }
+        list.appendChild(row);
       });
     });
   }
 
+  // Live In-Match Cheats (Admin & Owner)
   function spawnGuardCmd() {
     if (!prof || !prof.isOwner || !mode || !M) return;
     if (mode === 'bot' || mode === 'local' || mode === 'endless') {
       var ev = [];
       S.spawnBodyguard(M, me, ev);
       onEv(ev);
-      var cnt = M.p.filter(function (x) { return x && x.isMinion && !x.dead; }).length;
+      var cnt = M.p.filter(function (x) { return x && x.isMinion && !x.dead && x.ownerIdx === me; }).length;
       toast('Spawned Bodyguard (' + cnt + ' active)');
       return;
     }
@@ -751,7 +806,7 @@
       if (M && M.p[me]) {
         M.p[me].god = !M.p[me].god;
         godActive = M.p[me].god;
-        $('admGod').textContent = 'Invulnerability: ' + (godActive ? 'ON' : 'OFF');
+        $('admGod').textContent = 'Invuln: ' + (godActive ? 'ON' : 'OFF');
         $('admGod').style.color = godActive ? 'var(--gold)' : 'var(--bone)';
         toast('God Mode ' + (godActive ? 'Enabled' : 'Disabled'));
       }
@@ -759,7 +814,7 @@
     }
     sock.emit('admin_match_toggle_god', function (r) {
       godActive = r.god;
-      $('admGod').textContent = 'Invulnerability: ' + (godActive ? 'ON' : 'OFF');
+      $('admGod').textContent = 'Invuln: ' + (godActive ? 'ON' : 'OFF');
       $('admGod').style.color = godActive ? 'var(--gold)' : 'var(--bone)';
       toast('God Mode ' + (godActive ? 'Enabled' : 'Disabled'));
     });
@@ -769,7 +824,7 @@
       if (M && M.p[me]) {
         M.p[me].noCd = !M.p[me].noCd;
         noCdActive = M.p[me].noCd;
-        $('admNoCd').textContent = 'No Cooldowns: ' + (noCdActive ? 'ON' : 'OFF');
+        $('admNoCd').textContent = 'No CD: ' + (noCdActive ? 'ON' : 'OFF');
         $('admNoCd').style.color = noCdActive ? 'var(--gold)' : 'var(--bone)';
         toast('No Cooldowns ' + (noCdActive ? 'Enabled' : 'Disabled'));
       }
@@ -777,7 +832,7 @@
     }
     sock.emit('admin_match_toggle_nocd', function (r) {
       noCdActive = r.noCd;
-      $('admNoCd').textContent = 'No Cooldowns: ' + (noCdActive ? 'ON' : 'OFF');
+      $('admNoCd').textContent = 'No CD: ' + (noCdActive ? 'ON' : 'OFF');
       $('admNoCd').style.color = noCdActive ? 'var(--gold)' : 'var(--bone)';
       toast('No Cooldowns ' + (noCdActive ? 'Enabled' : 'Disabled'));
     });
@@ -1134,6 +1189,7 @@
     }
   }
   function ring(x, y, c, r1, t, w) { fx.push({ k: 'r', x: x, y: y, t: t, T: t, r0: R, r1: r1, c: c, w: w }); }
+  function hitStop(t) { if (mode !== 'online' && mode !== 'ffa' && mode !== '2v2') freeze = t; }
 
   function onEv(ev) {
     (ev || []).forEach(function (e) {
@@ -1195,7 +1251,7 @@
         ring(e.x, e.y, c, R + (small ? 44 : 80), 0.55, 6);
         splat(e.x, e.y, c, small ? 12 : 22); stain(e.x, e.y, c, small ? 10 : 26, small ? 20 : 42);
         shake = small ? 4 : 11; punch = small ? 0.012 : 0.035; flash = small ? 0 : 0.35;
-        snd('kill', e.x);
+        hitStop(small ? 0.03 : 0.12); snd('kill', e.x);
         if (e.i === me) vib(90);
       } else if (e.t === 'spawn') { burst(e.x, e.y, COL[1], 14); ring(e.x, e.y, COL[1], R + 30, 0.4, 3); snd('spawn', e.x); }
       else if (e.t === 'boss_morph') {
@@ -1240,7 +1296,7 @@
     if (e.target && e.target.closest && e.target.closest('button')) snd('click');
   });
   addEventListener('keydown', function (e) {
-    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT')) return;
+    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA')) return;
     var k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
     if (k === 'm' && typeof Sfx !== 'undefined') { Sfx.toggle(); syncMute(); return; }
     if (k === 'p' && prof && prof.isOwner && mode) {
@@ -1720,9 +1776,12 @@
       return;
     }
     if (M && (mode === 'bot' || mode === 'local' || mode === 'endless') && M.phase !== 'over') {
-      var inp = mode === 'endless' ? [localInp(0)] : [localInp(0), mode === 'bot' ? {} : localInp(1)];
-      onEv(S.tick(M, inp, dt));
-      if (M.phase === 'over') finishLocal();
+      if (freeze > 0) freeze -= dt;
+      else {
+        var inp = mode === 'endless' ? [localInp(0)] : [localInp(0), mode === 'bot' ? {} : localInp(1)];
+        onEv(S.tick(M, inp, dt));
+        if (M.phase === 'over') finishLocal();
+      }
     }
     watch(); smooth();
     if (M && (mode === 'endless' || mode === 'ffa' || mode === 'bot')) hud();
