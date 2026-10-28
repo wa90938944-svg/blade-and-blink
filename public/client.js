@@ -16,6 +16,7 @@
     { n: 'Gold', min: 1000, next: 1500, c: '#d9a526' },
     { n: 'Platinum', min: 1500, next: 2000, c: '#8fbfb4' },
     { n: 'Diamond', min: 2000, next: 2000, c: '#f2ece0' },
+    { n: 'Admin', min: 9999, next: 9999, c: '#8fbfb4' },
     { n: 'Owner', min: 9999, next: 9999, c: '#e2503a' }
   ];
   var RANK_NAMES = RANKS.map(function (r) { return r.n; });
@@ -32,7 +33,7 @@
   var TRAIL_TINT = { silver: '#d6d2c8', gold: '#e5b842', platinum: '#c9331f' };
   var looks = ['none', 'none'];
   var teams = [0, 1];
-  var godActive = false, noCdActive = false;
+  var godActive = false, noCdActive = false, speedActive = false;
 
   var selectedTier = 'novice';
   var apexConquered = false;
@@ -192,34 +193,31 @@
     var baseR = p.r || (R * 2.2);
     var pu = 0.5 + 0.5 * Math.sin(now / 260);
 
-    // Menacing dark crimson aura
     g.strokeStyle = 'rgba(139, 12, 8, ' + (0.22 + 0.18 * pu).toFixed(2) + ')';
     g.lineWidth = 4;
     g.beginPath(); g.arc(px, py, baseR + 8 + pu * 4, 0, 6.283); g.stroke();
 
-    // Deep dark-red body
     g.fillStyle = p.st > 0 ? '#7a524c' : '#580a06';
     g.beginPath(); g.arc(px, py, baseR, 0, 6.283); g.fill();
     g.strokeStyle = '#191514'; g.lineWidth = 4; g.stroke();
 
-    // Sclera (sharp central eye)
     var eyeR = baseR * 0.46;
     g.fillStyle = '#efe6d2';
     g.beginPath(); g.arc(px, py, eyeR, 0, 6.283); g.fill();
     g.strokeStyle = '#191514'; g.lineWidth = 2; g.stroke();
 
-    // Tracking pupil
     var target = (M && M.p[0] && !M.p[0].dead) ? M.p[0] : { x: px + Math.cos(fa) * 40, y: py + Math.sin(fa) * 40 };
-    var disp0 = disp[0] || target;
+    if (p.isPlayableTetanus) {
+      target = { x: px + Math.cos(fa) * 40, y: py + Math.sin(fa) * 40 };
+    }
+    var disp0 = p.isPlayableTetanus ? target : (disp[0] || target);
     var ang = Math.atan2(disp0.y - py, disp0.x - px);
     var off = eyeR * 0.38;
     var ex = px + Math.cos(ang) * off, ey = py + Math.sin(ang) * off;
 
-    // Crimson iris
     g.fillStyle = '#c9331f';
     g.beginPath(); g.arc(ex, ey, eyeR * 0.48, 0, 6.283); g.fill();
 
-    // Sharp vertical slit pupil
     g.save();
     g.translate(ex, ey);
     g.rotate(ang);
@@ -229,7 +227,6 @@
     g.fill();
     g.restore();
 
-    // Massive Boss Blade
     var ca = Math.cos(fa), sa = Math.sin(fa);
     var x0 = px + ca * baseR * 0.4, y0 = py + sa * baseR * 0.4;
     var x1 = px + ca * (baseR + 30), y1 = py + sa * (baseR + 30);
@@ -327,15 +324,15 @@
     $('savebtn').hidden = !prof;
     $('logout').hidden = !prof;
     $('cooplocalbtn').hidden = touch;
-    $('adminbar').hidden = !(prof && prof.isOwner);
+    $('adminbar').hidden = !(prof && (prof.isOwner || prof.isAdmin));
     show('lobby');
   }
   function setProfile(p) {
     prof = p;
     var r = RANKS.filter(function (x) { return x.n === p.rank; })[0] || RANKS[0];
-    $('badge').textContent = p.isOwner ? '👑' : r.n[0];
+    $('badge').textContent = p.isOwner ? '👑' : (p.isAdmin ? 'A' : r.n[0]);
     $('badge').style.setProperty('--rc', r.c);
-    $('uname').textContent = (p.isOwner ? '[OWNER] ' : '') + p.name;
+    $('uname').textContent = (p.isOwner ? '[OWNER] ' : (p.isAdmin ? '[ADMIN] ' : '')) + p.name;
     $('rname').textContent = r.n;
     $('rname').style.color = r.c;
     $('mmr').textContent = p.mmr + ' MMR';
@@ -344,8 +341,8 @@
     var hasNext = r.next > r.min;
     $('prog').style.width = (hasNext ? Math.min(1, (p.mmr - r.min) / (r.next - r.min)) * 100 : 100) + '%';
     $('prog').style.background = r.c;
-    $('nextlbl').textContent = p.isOwner ? 'Infinite Reign' : (hasNext ? (r.next - p.mmr) + ' to ' + RANKS[RANKS.indexOf(r) + 1].n : 'Top rank');
-    $('adminbar').hidden = !p.isOwner;
+    $('nextlbl').textContent = (p.isOwner || p.isAdmin) ? 'Infinite Reign' : (hasNext ? (r.next - p.mmr) + ' to ' + RANKS[RANKS.indexOf(r) + 1].n : 'Top rank');
+    $('adminbar').hidden = !(p.isOwner || p.isAdmin);
   }
 
   function result(title, d1, d2, delta, sound) {
@@ -572,54 +569,132 @@
     });
   }
 
-  // ---------- Admin Panel Interactions (Works Online & Offline) ----------
+  // ---------- Admin Panel Interactions ----------
   $('adminbtn').onclick = function () {
-    if (!prof || !prof.isOwner) return;
+    if (!prof || (!prof.isOwner && !prof.isAdmin)) return;
     var inMatch = !!mode;
-    $('adminMatchTools').hidden = !inMatch;
-    $('adminMenuTools').hidden = inMatch;
-    if (!inMatch) loadAdminUserList();
+    $('admTabs').hidden = inMatch;
+    $('admCheatsSection').hidden = !inMatch;
+    $('admDbSection').hidden = inMatch;
+    $('admReportsSection').hidden = true;
+    $('admOwnerCheats').hidden = !prof.isOwner;
+
+    if (!inMatch) {
+      document.querySelectorAll('.adm-tab').forEach(function(e) { e.classList.remove('active'); });
+      $('tabDb').classList.add('active');
+      $('admSearch').value = '';
+      loadAdminUserList();
+    }
     show('adminpanel');
   };
+
   $('adminClose').onclick = function () {
-    if (mode) show(null);
-    else showLobby();
+    if (mode) show(null); else showLobby();
   };
-  $('admFightTetanus').onclick = function () {
-    if (!prof || !prof.isOwner) return;
-    startBotDuel('tetanus');
+
+  ['Db', 'Reports', 'Cheats'].forEach(function(id) {
+    $('tab' + id).onclick = function() {
+      document.querySelectorAll('.adm-tab').forEach(function(e) { e.classList.remove('active'); });
+      $('tab' + id).classList.add('active');
+      $('admDbSection').hidden = (id !== 'Db');
+      $('admReportsSection').hidden = (id !== 'Reports');
+      $('admCheatsSection').hidden = (id !== 'Cheats');
+      if (id === 'Db') loadAdminUserList();
+      if (id === 'Reports') loadAdminReports();
+    };
+  });
+
+  $('admSearch').oninput = function() {
+    var q = this.value.toLowerCase();
+    document.querySelectorAll('.adm-user-row').forEach(function(row) {
+      row.style.display = row.innerText.toLowerCase().includes(q) ? '' : 'none';
+    });
   };
 
   function loadAdminUserList() {
     var list = $('adminUserList');
-    list.innerHTML = '<div style="padding:10px;text-align:center">Loading user records...</div>';
+    list.innerHTML = '<div style="padding:10px;text-align:center">Loading...</div>';
     sock.emit('admin_get_users', function (r) {
       if (!r || !r.ok) { list.innerHTML = '<div style="padding:10px;color:var(--redhi)">Failed to load data</div>'; return; }
       list.innerHTML = '';
       r.users.forEach(function (u) {
         var row = document.createElement('div');
         row.className = 'adm-user-row';
-        row.innerHTML = '<div><b>' + u.name + '</b> <small>(' + u.rank + ', ' + u.mmr + ' MMR' + (u.banned ? ' - <span style="color:var(--redhi)">BANNED</span>' : '') + ')</small></div>' +
-          '<div style="display:flex;gap:4px;align-items:center">' +
-          '<input type="number" id="mmr_' + u.key + '" placeholder="MMR" value="' + u.mmr + '">' +
-          '<button class="sec" id="setmmr_' + u.key + '">Save</button>' +
-          '<button style="background:' + (u.banned ? 'var(--gold)' : 'var(--red)') + '" id="ban_' + u.key + '">' + (u.banned ? 'Unban' : 'Ban') + '</button>' +
-          '</div>';
+        var tags = '';
+        if (u.isOwner) tags += '<span class="tag tag-owner">OWNER</span>';
+        if (u.isAdmin) tags += '<span class="tag tag-admin">ADMIN</span>';
+        if (u.banned) tags += '<span class="tag tag-banned">BANNED</span>';
+        
+        var top = '<div class="adm-user-header"><b>' + u.name + tags + '</b> <span>' + u.rank + ' (' + u.mmr + ')</span></div>';
+        var tools = '<div class="adm-user-tools">';
+
+        if (prof.isOwner) {
+          tools += '<input type="number" id="mmr_' + u.key + '" value="' + u.mmr + '" title="MMR">';
+          tools += '<button class="sec" id="setmmr_' + u.key + '">Save MMR</button>';
+          if (!u.isOwner) {
+            tools += '<button class="sec" id="prom_' + u.key + '">' + (u.isAdmin ? 'Demote Admin' : 'Make Admin') + '</button>';
+          }
+        }
+        if (!u.isOwner && (prof.isOwner || (prof.isAdmin && !u.isAdmin))) {
+          if (u.banned) {
+            tools += '<button style="background:var(--gold);color:#000" id="ban_' + u.key + '">Unban</button>';
+          } else {
+            tools += '<input type="text" id="banr_' + u.key + '" placeholder="Ban reason...">';
+            tools += '<button style="background:var(--redhi)" id="ban_' + u.key + '">Ban</button>';
+          }
+        }
+        tools += '</div>';
+        row.innerHTML = top + tools;
         list.appendChild(row);
 
-        $('setmmr_' + u.key).onclick = function () {
-          var val = $('mmr_' + u.key).value;
-          sock.emit('admin_set_mmr', { key: u.key, mmr: val }, function (resp) {
-            if (resp && resp.ok) { toast('MMR Updated (' + resp.mmr + ')'); loadAdminUserList(); }
-            else toast((resp && resp.err) || 'Error', true);
-          });
+        var btnMmr = row.querySelector('#setmmr_' + u.key);
+        if (btnMmr) btnMmr.onclick = function () {
+          sock.emit('admin_set_mmr', { key: u.key, mmr: row.querySelector('#mmr_' + u.key).value }, loadAdminUserList);
         };
-        $('ban_' + u.key).onclick = function () {
-          sock.emit('admin_set_ban', { key: u.key, banned: !u.banned }, function (resp) {
-            if (resp && resp.ok) { toast(resp.banned ? 'Player Banned' : 'Player Unbanned'); loadAdminUserList(); }
-            else toast((resp && resp.err) || 'Error', true);
-          });
+        var btnProm = row.querySelector('#prom_' + u.key);
+        if (btnProm) btnProm.onclick = function () {
+          sock.emit('owner_set_admin', { key: u.key, isAdmin: !u.isAdmin }, loadAdminUserList);
         };
+        var btnBan = row.querySelector('#ban_' + u.key);
+        if (btnBan) {
+          btnBan.onclick = function () {
+            var reason = u.banned ? '' : row.querySelector('#banr_' + u.key).value;
+            sock.emit('admin_set_ban', { key: u.key, banned: !u.banned, reason: reason }, function (res) {
+              if (res.err) toast(res.err, true);
+              else { toast(u.banned ? 'Unbanned' : 'Banned'); loadAdminUserList(); }
+            });
+          };
+        }
+      });
+      // trigger search filter
+      $('admSearch').dispatchEvent(new Event('input'));
+    });
+  }
+
+  function loadAdminReports() {
+    var list = $('adminReportsList');
+    list.innerHTML = '<div style="padding:10px;text-align:center">Loading...</div>';
+    sock.emit('admin_get_reports', function (r) {
+      if (!r || !r.ok) { list.innerHTML = '<div style="padding:10px;color:var(--redhi)">Failed to load data</div>'; return; }
+      list.innerHTML = '';
+      if (r.reports.length === 0) list.innerHTML = '<div style="padding:10px;text-align:center">No active ban reports</div>';
+      r.reports.forEach(function (rep) {
+        var row = document.createElement('div');
+        row.className = 'adm-report-row';
+        var date = new Date(rep.timestamp).toLocaleString();
+        var btn = rep.activeBan ? `<button class="sec" style="margin-top:4px" id="unban_${rep.id}">Unban ${rep.targetName}</button>` : `<div style="color:var(--dim);font-size:12px;margin-top:4px">Ban Lifted</div>`;
+        row.innerHTML = `<div><b style="color:var(--redhi)">${rep.targetName}</b> banned by ${rep.adminName} (${rep.adminRole})</div>
+                         <div style="font-size:12px;color:var(--dim)">${date}</div>
+                         <div style="margin-top:4px"><b>Reason:</b> ${rep.reason}</div>
+                         ${btn}`;
+        list.appendChild(row);
+        if (rep.activeBan) {
+          row.querySelector('#unban_' + rep.id).onclick = function() {
+            sock.emit('admin_set_ban', {key: rep.targetKey, banned: false}, function(res) {
+              if (res.err) toast(res.err, true); else { toast('Unbanned'); loadAdminReports(); }
+            });
+          };
+        }
       });
     });
   }
@@ -628,7 +703,7 @@
     if (!prof || !prof.isOwner || !mode || !M) return;
     if (mode === 'bot' || mode === 'local' || mode === 'endless') {
       var ev = [];
-      S.spawnBodyguard(M, 0, ev);
+      S.spawnBodyguard(M, me, ev);
       onEv(ev);
       var cnt = M.p.filter(function (x) { return x && x.isMinion && !x.dead; }).length;
       toast('Spawned Bodyguard (' + cnt + ' active)');
@@ -639,15 +714,30 @@
     });
   }
 
+  $('admFightTetanus').onclick = function () {
+    if (!prof || !prof.isOwner || !mode || !M) return;
+    if (mode === 'bot' || mode === 'local' || mode === 'endless') {
+      if (M && M.p[me]) {
+        var ev = [];
+        S.morphTetanus(M, me, ev);
+        onEv(ev);
+        toast('Morphed into Tetanus!');
+      }
+      return;
+    }
+    sock.emit('owner_play_tetanus', function (r) {
+      if (r && r.ok) toast('Morphed into Tetanus!');
+    });
+  };
+
   $('admSpawnGuard').onclick = spawnGuardCmd;
 
   $('admKillAll').onclick = function () {
+    if (!prof || !prof.isOwner || !mode || !M) return;
     if (mode === 'bot' || mode === 'local' || mode === 'endless') {
-      if (M) {
-        M.p.forEach(function (p, idx) {
-          if (idx !== 0 && p && !p.dead && !p.isMinion) { p.lives = 0; p.hearts = 0; p.dead = true; }
-        });
-      }
+      M.p.forEach(function (p, idx) {
+        if (idx !== me && p && !p.dead && !p.isMinion) { p.lives = 0; p.hearts = 0; p.dead = true; }
+      });
       toast('Annihilated enemies');
       show(null);
       return;
@@ -658,9 +748,9 @@
   };
   $('admGod').onclick = function () {
     if (mode === 'bot' || mode === 'local' || mode === 'endless') {
-      if (M && M.p[0]) {
-        M.p[0].god = !M.p[0].god;
-        godActive = M.p[0].god;
+      if (M && M.p[me]) {
+        M.p[me].god = !M.p[me].god;
+        godActive = M.p[me].god;
         $('admGod').textContent = 'Invulnerability: ' + (godActive ? 'ON' : 'OFF');
         $('admGod').style.color = godActive ? 'var(--gold)' : 'var(--bone)';
         toast('God Mode ' + (godActive ? 'Enabled' : 'Disabled'));
@@ -676,9 +766,9 @@
   };
   $('admNoCd').onclick = function () {
     if (mode === 'bot' || mode === 'local' || mode === 'endless') {
-      if (M && M.p[0]) {
-        M.p[0].noCd = !M.p[0].noCd;
-        noCdActive = M.p[0].noCd;
+      if (M && M.p[me]) {
+        M.p[me].noCd = !M.p[me].noCd;
+        noCdActive = M.p[me].noCd;
         $('admNoCd').textContent = 'No Cooldowns: ' + (noCdActive ? 'ON' : 'OFF');
         $('admNoCd').style.color = noCdActive ? 'var(--gold)' : 'var(--bone)';
         toast('No Cooldowns ' + (noCdActive ? 'Enabled' : 'Disabled'));
@@ -692,6 +782,46 @@
       toast('No Cooldowns ' + (noCdActive ? 'Enabled' : 'Disabled'));
     });
   };
+  $('admSpeed').onclick = function () {
+    if (mode === 'bot' || mode === 'local' || mode === 'endless') {
+      if (M && M.p[me]) {
+        M.p[me].fast = !M.p[me].fast;
+        M.p[me].spd = M.p[me].fast ? 340 : (M.p[me].isPlayableTetanus ? 185 : 200);
+        speedActive = M.p[me].fast;
+        $('admSpeed').textContent = '2x Speed: ' + (speedActive ? 'ON' : 'OFF');
+        $('admSpeed').style.color = speedActive ? 'var(--gold)' : 'var(--bone)';
+        toast('2x Speed ' + (speedActive ? 'Enabled' : 'Disabled'));
+      }
+      return;
+    }
+    sock.emit('admin_match_toggle_speed', function (r) {
+      speedActive = r.fast;
+      $('admSpeed').textContent = '2x Speed: ' + (speedActive ? 'ON' : 'OFF');
+      $('admSpeed').style.color = speedActive ? 'var(--gold)' : 'var(--bone)';
+      toast('2x Speed ' + (speedActive ? 'Enabled' : 'Disabled'));
+    });
+  };
+  $('admHeal').onclick = function () {
+    if (mode === 'bot' || mode === 'local' || mode === 'endless') {
+      if (M && M.p[me] && !M.p[me].dead) {
+        M.p[me].lives = Math.max(M.p[me].maxLives, 5);
+        M.p[me].maxLives = Math.max(M.p[me].maxLives, 5);
+        M.p[me].hearts = M.p[me].maxHearts;
+        M.p[me].st = 0;
+        toast('Health Refilled');
+      }
+      return;
+    }
+    sock.emit('admin_match_heal', function (r) { if(r.ok) toast('Health Refilled'); });
+  };
+  $('admAnnounceBtn').onclick = function () {
+    if (!prof || !prof.isOwner) return;
+    var t = $('admAnnounceText').value;
+    if (!t) return;
+    sock.emit('admin_announce', { text: t }, function (r) {
+      if (r && r.ok) { $('admAnnounceText').value = ''; toast('Announcement Sent'); }
+    });
+  };
 
   // ---------- Look Picker ----------
   $('lookbtn').onclick = function () { renderLooks(); show('wardrobe'); };
@@ -700,7 +830,7 @@
     var grid = $('lookgrid'), unlocked = (prof && prof.unlocked) || [], cur = prof && prof.equipped && prof.equipped.look;
     while (grid.firstChild) grid.removeChild(grid.firstChild);
     LOOKS.forEach(function (L) {
-      var open = (prof && prof.isOwner) || unlocked.indexOf(L.id) >= 0;
+      var open = (prof && (prof.isOwner || prof.isAdmin)) || unlocked.indexOf(L.id) >= 0;
       var b = document.createElement('button'), pv = document.createElement('canvas'), nm = document.createElement('span'), sm = document.createElement('small');
       b.className = 'look' + (L.id === cur ? ' sel' : '');
       b.disabled = !open;
@@ -713,7 +843,7 @@
       drawFighter(g, L.id, 0, 0, COL[0], -0.6, performance.now());
       g.restore(); g.globalAlpha = 1;
       nm.textContent = L.name;
-      sm.textContent = L.id === cur ? 'Equipped' : open ? (prof && prof.isOwner ? 'Unlocked (Owner)' : 'Unlocked') : 'Reach ' + L.need;
+      sm.textContent = L.id === cur ? 'Equipped' : open ? ((prof && (prof.isOwner || prof.isAdmin)) ? 'Unlocked (Staff)' : 'Unlocked') : 'Reach ' + L.need;
       b.appendChild(pv); b.appendChild(nm); b.appendChild(sm);
       b.onclick = function () { equipLook(L.id); };
       grid.appendChild(b);
@@ -740,7 +870,7 @@
     }
     rows.forEach(function (r, i) {
       var li = document.createElement('li'), a = document.createElement('span'), b = document.createElement('span');
-      a.textContent = (i + 1) + '. ' + (r.isOwner ? '[OWNER] ' : '') + r.name;
+      a.textContent = (i + 1) + '. ' + (r.isOwner ? '[OWNER] ' : (r.isAdmin ? '[ADMIN] ' : '')) + r.name;
       b.textContent = r.rank + '  ' + r.mmr;
       if (prof && r.name === prof.name) li.className = 'me';
       li.appendChild(a); li.appendChild(b); ol.appendChild(li);
@@ -861,6 +991,12 @@
       });
     };
     sock.on('connect', function () { resume(0); });
+    sock.on('profile_sync', function(p) {
+       if (p) setProfile(p);
+    });
+    sock.on('announcement', function(d) {
+       say("SERVER: " + d.text, 4);
+    });
     sock.on('match', function (d) {
       clearInterval(qI);
       isBossEncounter = false; bossDialogueT = 0;
@@ -901,7 +1037,10 @@
       result(won ? 'Victory' : 'Defeat', why + (d.score ? names[0] + ' ' + d.score[0] + ' - ' + d.score[1] + ' ' + names[1] : ''),
         line, d.delta ? (d.delta > 0 ? '+' : '') + d.delta + ' MMR' : '', won ? 'win' : 'lose');
     });
-    sock.on('kicked', function () { toLogin('You have been disconnected.'); });
+    sock.on('kicked', function (d) {
+      var reason = (d && d.reason) ? ' Reason: ' + d.reason : '';
+      toLogin('You have been disconnected.' + reason);
+    });
     sock.on('unauth', function () { setToken(''); toLogin('Your session ended, please log in again.'); });
     sock.on('disconnect', function () {
       if (mode === 'online' || mode === 'ffa' || mode === '2v2') { mode = null; result('Disconnected', 'Lost connection to server.', '', '', 'lose'); }
@@ -995,7 +1134,6 @@
     }
   }
   function ring(x, y, c, r1, t, w) { fx.push({ k: 'r', x: x, y: y, t: t, T: t, r0: R, r1: r1, c: c, w: w }); }
-  function hitStop(t) { if (mode !== 'online' && mode !== 'ffa' && mode !== '2v2') freeze = t; }
 
   function onEv(ev) {
     (ev || []).forEach(function (e) {
@@ -1014,6 +1152,7 @@
       else if (e.t === 'blink') {
         c = e.unparryable ? '#680c07' : COL[teams[e.i] || 0];
         var lk = looks[e.i] || 'none';
+        if (M && M.p[e.i] && M.p[e.i].isPlayableTetanus) c = '#680c07';
         fx.push({ k: 'l', x1: e.x1, y1: e.y1, x2: e.x2, y2: e.y2, t: 0.4, c: c, tint: TRAIL_TINT[lk] });
         if (lk === 'diamond') sparks(e.x1, e.y1, e.x2, e.y2, c);
         else if (lk === 'silver') dashWanderer(e.x1, e.y1, e.x2, e.y2, c);
@@ -1056,9 +1195,15 @@
         ring(e.x, e.y, c, R + (small ? 44 : 80), 0.55, 6);
         splat(e.x, e.y, c, small ? 12 : 22); stain(e.x, e.y, c, small ? 10 : 26, small ? 20 : 42);
         shake = small ? 4 : 11; punch = small ? 0.012 : 0.035; flash = small ? 0 : 0.35;
-        hitStop(small ? 0.03 : 0.12); snd('kill', e.x);
+        snd('kill', e.x);
         if (e.i === me) vib(90);
       } else if (e.t === 'spawn') { burst(e.x, e.y, COL[1], 14); ring(e.x, e.y, COL[1], R + 30, 0.4, 3); snd('spawn', e.x); }
+      else if (e.t === 'boss_morph') {
+        shake = 15;
+        burst(e.x, e.y, '#5c0a06', 40);
+        ring(e.x, e.y, '#c9331f', R + 120, 0.8, 8);
+        snd('gong');
+      }
     });
     hud();
   }
@@ -1352,7 +1497,6 @@
       var pReach = p.reach || S.REACH;
       var pR = p.r || R;
 
-      // Boss Telegraph Warning Indicator
       if (p.bossTelegraph > 0) {
         ctx.save();
         if (p.bossAction === 'crush') {
@@ -1448,7 +1592,6 @@
         drawBlade(ctx, look, px, py, p.fa, c, p.sc > 0);
       }
 
-      // Overhead Lives & Hearts Bar for Multi-Life / Multi-Heart fighters
       if ((p.tier && p.tier !== 'player') || p.maxLives > 1) {
         var barW = Math.max(36, pR * 2.2);
         var sx = px - barW / 2;
@@ -1477,7 +1620,6 @@
 
     ctx.restore();
 
-    // Screen-Space UI overlays
     var selfP = M.p[me || 0];
     if (selfP && !selfP.dead && (!M.endless || me === 0)) {
       var bx = 20;
@@ -1497,7 +1639,6 @@
     ctx.drawImage(vigC, 0, 0);
     ctx.globalAlpha = 0.6; ctx.drawImage(grainC, 0, 0); ctx.globalAlpha = 1;
 
-    // Secret Boss Dialogue Banner
     if (bossDialogueT > 0) {
       ctx.save();
       ctx.fillStyle = 'rgba(18, 12, 10, 0.92)';
@@ -1579,12 +1720,9 @@
       return;
     }
     if (M && (mode === 'bot' || mode === 'local' || mode === 'endless') && M.phase !== 'over') {
-      if (freeze > 0) freeze -= dt;
-      else {
-        var inp = mode === 'endless' ? [localInp(0)] : [localInp(0), mode === 'bot' ? {} : localInp(1)];
-        onEv(S.tick(M, inp, dt));
-        if (M.phase === 'over') finishLocal();
-      }
+      var inp = mode === 'endless' ? [localInp(0)] : [localInp(0), mode === 'bot' ? {} : localInp(1)];
+      onEv(S.tick(M, inp, dt));
+      if (M.phase === 'over') finishLocal();
     }
     watch(); smooth();
     if (M && (mode === 'endless' || mode === 'ffa' || mode === 'bot')) hud();
