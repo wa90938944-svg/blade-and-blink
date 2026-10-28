@@ -32,7 +32,7 @@
   var TRAIL_TINT = { silver: '#d6d2c8', gold: '#e5b842', platinum: '#c9331f' };
   var looks = ['none', 'none'];
   var teams = [0, 1];
-  var godActive = false, noCdActive = false, fastActive = false;
+  var godActive = false, noCdActive = false;
 
   var selectedTier = 'novice';
   var apexConquered = false;
@@ -192,28 +192,34 @@
     var baseR = p.r || (R * 2.2);
     var pu = 0.5 + 0.5 * Math.sin(now / 260);
 
+    // Menacing dark crimson aura
     g.strokeStyle = 'rgba(139, 12, 8, ' + (0.22 + 0.18 * pu).toFixed(2) + ')';
     g.lineWidth = 4;
     g.beginPath(); g.arc(px, py, baseR + 8 + pu * 4, 0, 6.283); g.stroke();
 
+    // Deep dark-red body
     g.fillStyle = p.st > 0 ? '#7a524c' : '#580a06';
     g.beginPath(); g.arc(px, py, baseR, 0, 6.283); g.fill();
     g.strokeStyle = '#191514'; g.lineWidth = 4; g.stroke();
 
+    // Sclera (sharp central eye)
     var eyeR = baseR * 0.46;
     g.fillStyle = '#efe6d2';
     g.beginPath(); g.arc(px, py, eyeR, 0, 6.283); g.fill();
     g.strokeStyle = '#191514'; g.lineWidth = 2; g.stroke();
 
+    // Tracking pupil
     var target = (M && M.p[0] && !M.p[0].dead) ? M.p[0] : { x: px + Math.cos(fa) * 40, y: py + Math.sin(fa) * 40 };
     var disp0 = disp[0] || target;
     var ang = Math.atan2(disp0.y - py, disp0.x - px);
     var off = eyeR * 0.38;
     var ex = px + Math.cos(ang) * off, ey = py + Math.sin(ang) * off;
 
+    // Crimson iris
     g.fillStyle = '#c9331f';
     g.beginPath(); g.arc(ex, ey, eyeR * 0.48, 0, 6.283); g.fill();
 
+    // Sharp vertical slit pupil
     g.save();
     g.translate(ex, ey);
     g.rotate(ang);
@@ -223,6 +229,7 @@
     g.fill();
     g.restore();
 
+    // Massive Boss Blade
     var ca = Math.cos(fa), sa = Math.sin(fa);
     var x0 = px + ca * baseR * 0.4, y0 = py + sa * baseR * 0.4;
     var x1 = px + ca * (baseR + 30), y1 = py + sa * (baseR + 30);
@@ -308,7 +315,6 @@
     sv.x = 0; sv.y = 0; sid = null; $('knob').style.transform = '';
     disarm();
   }
-  
   function showLobby() {
     $('card').style.display = prof ? '' : 'none';
     $('rank').disabled = !prof;
@@ -321,10 +327,9 @@
     $('savebtn').hidden = !prof;
     $('logout').hidden = !prof;
     $('cooplocalbtn').hidden = touch;
-    $('adminbar').hidden = !(prof && (prof.isOwner || prof.isAdmin));
+    $('adminbar').hidden = !(prof && prof.isOwner);
     show('lobby');
   }
-  
   function setProfile(p) {
     prof = p;
     var r = RANKS.filter(function (x) { return x.n === p.rank; })[0] || RANKS[0];
@@ -340,7 +345,7 @@
     $('prog').style.width = (hasNext ? Math.min(1, (p.mmr - r.min) / (r.next - r.min)) * 100 : 100) + '%';
     $('prog').style.background = r.c;
     $('nextlbl').textContent = p.isOwner ? 'Infinite Reign' : (hasNext ? (r.next - p.mmr) + ' to ' + RANKS[RANKS.indexOf(r) + 1].n : 'Top rank');
-    $('adminbar').hidden = !(p.isOwner || p.isAdmin);
+    $('adminbar').hidden = !p.isOwner;
   }
 
   function result(title, d1, d2, delta, sound) {
@@ -566,59 +571,19 @@
       $('partyready').textContent = d.host ? 'Ready (Host)' : 'Toggle Ready';
     });
     
-    sock.on('announcement', function (msg) {
-      var banner = $('announcement');
-      if (banner) {
-        banner.textContent = msg;
-        banner.classList.add('show');
-        snd('gong');
-        setTimeout(function () { banner.classList.remove('show'); }, 6000);
-      }
+    sock.on('s', function (d) {
+      if (mode !== 'online' && mode !== 'ffa' && mode !== '2v2') return;
+      M = d.m; onEv(d.ev);
     });
-
-    sock.on('chat_msg', function(d) {
-      var log = $('chatLog');
-      $('chatWrap').hidden = false;
-      var el = document.createElement('div');
-      el.className = 'chat-msg';
-      var nameSpan = document.createElement('b');
-      nameSpan.textContent = d.name + ' ';
-      el.appendChild(nameSpan);
-      var textSpan = document.createElement('span');
-      textSpan.textContent = d.msg;
-      el.appendChild(textSpan);
-      log.appendChild(el);
-      if (log.childNodes.length > 5) log.removeChild(log.firstChild);
-      setTimeout(function() {
-        if (el.parentNode === log) {
-          log.removeChild(el);
-          if (log.childNodes.length === 0 && $('chatInputWrap').style.display !== 'block') {
-            $('chatWrap').hidden = true;
-          }
-        }
-      }, 8000);
-    });
-
     sock.on('end', function (d) {
       mode = null;
       if (d.profile) setProfile(d.profile);
-      if (d.mode === 'ffa') {
-        if (d.extracted) {
-          result('Extracted!', 'Secured ' + (d.kills || 0) + ' Kills.', 'Banked to rank: ' + (d.delta > 0 ? '+' : '') + d.delta + ' MMR', (d.delta > 0 ? '+' : '') + d.delta + ' MMR', 'win');
-        } else {
-          var penaltyTxt = (d.delta && d.delta < 0) ? 'Penalty applied for dying with under 5 kills.' : 'All unbanked Essence was lost.';
-          result('Defeated', 'You failed to extract.', penaltyTxt, d.delta ? d.delta + ' MMR' : '', 'lose');
-        }
-        return;
-      }
       var won = d.winner === (d.mode === '2v2' ? teams[me] : d.you);
       var why = d.forfeit ? (d.quit === d.you ? 'You forfeited. ' : 'Opponent forfeited. ') : '';
       var line = (d.profile ? d.profile.rank + ', ' + d.profile.mmr + ' MMR' : '');
       if (d.unranked) line = 'Unranked Private Match';
-      var deltaStr = d.delta ? (d.delta > 0 ? '+' + d.delta + ' MMR' : d.delta + ' MMR') : (won ? '' : '0 MMR'); 
-      if (!won && d.delta === 0) deltaStr = '0 MMR'; 
       result(won ? 'Victory' : 'Defeat', why + (d.score ? names[0] + ' ' + d.score[0] + ' - ' + d.score[1] + ' ' + names[1] : ''),
-        line, deltaStr, won ? 'win' : 'lose');
+        line, d.delta ? (d.delta > 0 ? '+' : '') + d.delta + ' MMR' : '', won ? 'win' : 'lose');
     });
     sock.on('kicked', function () { toLogin('You have been disconnected.'); });
     sock.on('unauth', function () { setToken(''); toLogin('Your session ended, please log in again.'); });
@@ -636,243 +601,6 @@
       sock.volatile.emit('pg', function () { $('ping').textContent = (Date.now() - t) + ' ms'; });
     }, 2000);
   }
-
-  // ---------- Admin Panel Interactions ----------
-  $('adminbtn').onclick = function () {
-    if (!prof || (!prof.isOwner && !prof.isAdmin)) return;
-    var inMatch = !!mode;
-    $('adminMatchTools').hidden = !inMatch;
-    $('adminMenuTools').hidden = inMatch;
-    
-    // Only display owner cheats if the player is actually the owner
-    $('ownerCheats').style.display = (inMatch && prof.isOwner) ? 'flex' : 'none';
-    
-    if (!inMatch) {
-      $('admSearch').value = '';
-      loadAdminUserList('');
-    }
-    show('adminpanel');
-  };
-  
-  $('adminClose').onclick = function () {
-    if (mode) show(null);
-    else showLobby();
-  };
-  
-  $('admFightTetanus').onclick = function () {
-    if (!prof || (!prof.isOwner && !prof.isAdmin)) return;
-    startBotDuel('tetanus');
-  };
-
-  $('admSearchBtn').onclick = function() { loadAdminUserList($('admSearch').value); };
-  $('admSearch').addEventListener('keydown', function(e) { if (e.key === 'Enter') $('admSearchBtn').click(); });
-
-  function loadAdminUserList(searchStr) {
-    var list = $('adminUserList');
-    list.innerHTML = '<div style="padding:10px;text-align:center">Loading user records...</div>';
-    sock.emit('admin_get_users', { search: searchStr }, function (r) {
-      if (!r || !r.ok) { list.innerHTML = '<div style="padding:10px;color:var(--redhi)">Failed to load data</div>'; return; }
-      list.innerHTML = '';
-      r.users.forEach(function (u) {
-        var row = document.createElement('div');
-        row.className = 'adm-user-row';
-        var adminHtml = (prof.isOwner && !u.isOwner) ? '<button class="sec" style="background:var(--gold);color:#000" id="prom_' + u.key + '">' + (u.isAdmin ? 'Demote' : 'Promote') + '</button>' : '';
-        row.innerHTML = '<div><b>' + u.name + '</b> <small>(' + u.rank + ', ' + u.mmr + ' MMR' + (u.banned ? ' - <span style="color:var(--redhi)">BANNED</span>' : '') + (u.isAdmin ? ' - <span style="color:var(--gold)">ADMIN</span>' : '') + ')</small></div>' +
-          '<div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;margin-top:4px">' +
-          adminHtml +
-          '<input type="number" id="mmr_' + u.key + '" placeholder="MMR" value="' + u.mmr + '">' +
-          '<button class="sec" id="setmmr_' + u.key + '">Save</button>' +
-          '<button style="background:' + (u.banned ? 'var(--gold)' : 'var(--red)') + '" id="ban_' + u.key + '">' + (u.banned ? 'Unban' : 'Ban') + '</button>' +
-          '</div>';
-        list.appendChild(row);
-
-        $('setmmr_' + u.key).onclick = function () {
-          if (!prof.isOwner) return toast('Owner level required to adjust MMR', true);
-          var val = $('mmr_' + u.key).value;
-          sock.emit('admin_set_mmr', { key: u.key, mmr: val }, function (resp) {
-            if (resp && resp.ok) { toast('MMR Updated (' + resp.mmr + ')'); loadAdminUserList($('admSearch').value); }
-            else toast((resp && resp.err) || 'Error', true);
-          });
-        };
-        $('ban_' + u.key).onclick = function () {
-          var willBan = !u.banned;
-          var reason = '';
-          if (willBan) {
-            reason = prompt('Enter a detailed reason for banning ' + u.name + ':');
-            if (reason === null) return;
-          }
-          sock.emit('admin_set_ban', { key: u.key, banned: willBan, reason: reason }, function (resp) {
-            if (resp && resp.ok) { toast(resp.banned ? 'Player Banned' : 'Player Unbanned'); loadAdminUserList($('admSearch').value); }
-            else toast((resp && resp.err) || 'Error', true);
-          });
-        };
-        if ($('prom_' + u.key)) {
-          $('prom_' + u.key).onclick = function () {
-            sock.emit('admin_set_admin', { key: u.key, isAdmin: !u.isAdmin }, function (resp) {
-              if (resp && resp.ok) { toast(resp.isAdmin ? 'Promoted to Admin' : 'Demoted'); loadAdminUserList($('admSearch').value); }
-              else toast((resp && resp.err) || 'Error', true);
-            });
-          };
-        }
-      });
-    });
-  }
-
-  $('admBansBtn').onclick = function() {
-    var list = $('adminBansList');
-    list.innerHTML = '<div style="padding:10px;text-align:center">Loading reports...</div>';
-    show('adminBanReports');
-    sock.emit('admin_get_bans', function(r) {
-      if (!r || !r.ok) { list.innerHTML = '<span class="err" style="padding:10px">Failed to load</span>'; return; }
-      list.innerHTML = '';
-      if (r.bans.length === 0) list.innerHTML = '<div style="padding:10px">No banned players.</div>';
-      r.bans.forEach(function(b) {
-         var d = document.createElement('div');
-         d.style.cssText = 'padding:6px;border-bottom:1px solid var(--line)';
-         d.innerHTML = '<strong style="color:var(--redhi)">' + b.name + '</strong>: ' + (b.reason || 'No description provided.');
-         list.appendChild(d);
-      });
-    });
-  };
-  
-  $('admBackToPanel').onclick = function() { show('adminpanel'); };
-
-  function spawnGuardCmd() {
-    if (!prof || (!prof.isOwner && !prof.isAdmin) || !mode || !M) return;
-    if (mode === 'bot' || mode === 'local' || mode === 'endless') {
-      var ev = [];
-      S.spawnBodyguard(M, 0, ev);
-      onEv(ev);
-      var cnt = M.p.filter(function (x) { return x && x.isMinion && !x.dead; }).length;
-      toast('Spawned Bodyguard (' + cnt + ' active)');
-      return;
-    }
-    sock.emit('admin_spawn_bodyguard', function (r) {
-      if (r && r.ok) toast('Spawned Bodyguard (' + r.count + ' active)');
-    });
-  }
-
-  $('admSpawnGuard').onclick = spawnGuardCmd;
-  
-  function cleanBotsCmd() {
-    if (!prof || (!prof.isOwner && !prof.isAdmin) || !mode || !M) return;
-    if (mode === 'bot' || mode === 'local' || mode === 'endless') {
-      let count = 0;
-      M.p.forEach(function (p) {
-        if (p && !p.dead && p.isMinion) { p.dead = true; p.lives = 0; p.hearts = 0; count++; }
-      });
-      toast('Cleaned ' + count + ' bots');
-      return;
-    }
-    sock.emit('admin_clean_bots', function (r) {
-      if (r && r.ok) toast('Cleaned ' + r.count + ' bots');
-    });
-  }
-  
-  $('admCleanBots').onclick = cleanBotsCmd;
-
-  $('admKillAll').onclick = function () {
-    if (mode === 'bot' || mode === 'local' || mode === 'endless') {
-      if (M) {
-        M.p.forEach(function (p, idx) {
-          if (idx !== 0 && p && !p.dead && !p.isMinion && !p.isOwner) { p.lives = 0; p.hearts = 0; p.dead = true; }
-        });
-      }
-      toast('Annihilated enemies');
-      show(null);
-      return;
-    }
-    sock.emit('admin_match_kill_enemies');
-    toast('Annihilated enemies');
-    show(null);
-  };
-
-  $('admGod').onclick = function () {
-    if (mode === 'bot' || mode === 'local' || mode === 'endless') {
-      if (M && M.p[0]) {
-        M.p[0].god = !M.p[0].god;
-        godActive = M.p[0].god;
-        $('admGod').textContent = 'Invulnerability: ' + (godActive ? 'ON' : 'OFF');
-        $('admGod').style.color = godActive ? 'var(--gold)' : 'var(--bone)';
-        toast('God Mode ' + (godActive ? 'Enabled' : 'Disabled'));
-      }
-      return;
-    }
-    sock.emit('admin_match_toggle_god', function (r) {
-      godActive = r.god;
-      $('admGod').textContent = 'Invulnerability: ' + (godActive ? 'ON' : 'OFF');
-      $('admGod').style.color = godActive ? 'var(--gold)' : 'var(--bone)';
-      toast('God Mode ' + (godActive ? 'Enabled' : 'Disabled'));
-    });
-  };
-
-  $('admNoCd').onclick = function () {
-    if (mode === 'bot' || mode === 'local' || mode === 'endless') {
-      if (M && M.p[0]) {
-        M.p[0].noCd = !M.p[0].noCd;
-        noCdActive = M.p[0].noCd;
-        $('admNoCd').textContent = 'No Cooldowns: ' + (noCdActive ? 'ON' : 'OFF');
-        $('admNoCd').style.color = noCdActive ? 'var(--gold)' : 'var(--bone)';
-        toast('No Cooldowns ' + (noCdActive ? 'Enabled' : 'Disabled'));
-      }
-      return;
-    }
-    sock.emit('admin_match_toggle_nocd', function (r) {
-      noCdActive = r.noCd;
-      $('admNoCd').textContent = 'No Cooldowns: ' + (noCdActive ? 'ON' : 'OFF');
-      $('admNoCd').style.color = noCdActive ? 'var(--gold)' : 'var(--bone)';
-      toast('No Cooldowns ' + (noCdActive ? 'Enabled' : 'Disabled'));
-    });
-  };
-  
-  $('admFast').onclick = function () {
-    if (mode === 'bot' || mode === 'local' || mode === 'endless') {
-      if (M && M.p[0]) {
-        M.p[0].fast = !M.p[0].fast;
-        fastActive = M.p[0].fast;
-        $('admFast').textContent = 'Super Speed: ' + (fastActive ? 'ON' : 'OFF');
-        $('admFast').style.color = fastActive ? 'var(--gold)' : 'var(--bone)';
-        toast('Super Speed ' + (fastActive ? 'Enabled' : 'Disabled'));
-      }
-      return;
-    }
-    sock.emit('admin_match_toggle_fast', function (r) {
-      fastActive = r.fast;
-      $('admFast').textContent = 'Super Speed: ' + (fastActive ? 'ON' : 'OFF');
-      $('admFast').style.color = fastActive ? 'var(--gold)' : 'var(--bone)';
-      toast('Super Speed ' + (fastActive ? 'Enabled' : 'Disabled'));
-    });
-  };
-
-  $('admBecomeTetanus').onclick = function () {
-    if (!prof || !prof.isOwner) return;
-    if (mode === 'bot' || mode === 'local' || mode === 'endless') {
-      if (M && M.p[0]) {
-        var p = M.p[0];
-        p.tier = 'tetanus';
-        p.maxLives = 3; p.lives = 3;
-        p.maxHearts = 5; p.hearts = 5;
-        p.reach = 92; p.scale = 2.2; p.r = 13 * 2.2; p.spd = 175;
-        toast('You are now Tetanus!');
-      }
-      return;
-    }
-    sock.emit('admin_become_tetanus', function (r) {
-      if (r && r.ok) toast('You are now Tetanus!');
-    });
-  };
-  
-  $('admAnnounceBtn').onclick = function() {
-    var msg = $('admAnnounceText').value.trim();
-    if (!msg) return;
-    sock.emit('admin_announce', { message: msg }, function(r) {
-      if (r && r.ok) {
-        toast('Announcement sent');
-        $('admAnnounceText').value = '';
-      }
-    });
-  };
-  $('admAnnounceText').addEventListener('keydown', function(e) { if (e.key === 'Enter') $('admAnnounceBtn').click(); });
 
   // ---------- Paper layers ----------
   function mkCanvas() { var c = document.createElement('canvas'); c.width = W; c.height = H; return c; }
@@ -967,12 +695,6 @@
         ring(e.x, e.y, GOLD, R + 45, 0.4, 4);
         burst(e.x, e.y, GOLD, 16);
       }
-      else if (e.t === 'shield_break') {
-        ring(e.x, e.y, '#ffffff', R + 40, 0.5, 4);
-        shatter(e.x, e.y, '#ffffff', 8);
-        snd('raise', e.x);
-        vib(20);
-      }
       else if (e.t === 'blink') {
         c = e.unparryable ? '#680c07' : COL[teams[e.i] || 0];
         var lk = looks[e.i] || 'none';
@@ -1056,44 +778,11 @@
   document.addEventListener('click', function (e) {
     if (e.target && e.target.closest && e.target.closest('button')) snd('click');
   });
-
-  $('chatInput').addEventListener('keydown', function (e) {
-    e.stopPropagation();
-    if (e.key === 'Enter') {
-      var txt = this.value.trim();
-      if (txt) sock.emit('chat', txt);
-      this.value = '';
-      $('chatInputWrap').style.display = 'none';
-      cv.focus();
-    }
-    if (e.key === 'Escape') {
-      this.value = '';
-      $('chatInputWrap').style.display = 'none';
-      cv.focus();
-    }
-  });
-
   addEventListener('keydown', function (e) {
     if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT')) return;
     var k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
     if (k === 'm' && typeof Sfx !== 'undefined') { Sfx.toggle(); syncMute(); return; }
     
-    if (k === 'c' && (mode === 'online' || mode === 'ffa' || mode === '2v2')) {
-      e.preventDefault();
-      $('chatWrap').hidden = false;
-      $('chatInputWrap').style.display = 'block';
-      $('chatInput').focus();
-      return;
-    }
-
-    if (k === 'p' && prof && (prof.isOwner || prof.isAdmin) && mode) {
-      spawnGuardCmd();
-      return;
-    }
-    if (k === 'o' && prof && (prof.isOwner || prof.isAdmin) && mode) {
-      cleanBotsCmd();
-      return;
-    }
     if (mode && (k.indexOf('Arrow') === 0 || k === ' ' || k === '/' || k === ',' || k === '.')) e.preventDefault();
     keys[k] = true;
     if (!mode || e.repeat) return;
@@ -1344,20 +1033,6 @@
       var pReach = p.reach || S.REACH;
       var pR = p.r || R;
 
-      if (p.isLeader && mode === 'ffa') {
-        var aPulse = 0.5 + 0.5 * Math.sin(now / 300);
-        ctx.strokeStyle = `rgba(217, 165, 38, ${0.4 + aPulse * 0.3})`; 
-        ctx.lineWidth = 3;
-        ctx.beginPath();
-        ctx.arc(px, py, pR + 14 + aPulse * 4, 0, 6.283);
-        ctx.stroke();
-        
-        ctx.fillStyle = GOLD;
-        ctx.font = '14px Arial';
-        ctx.textAlign = 'center';
-        ctx.fillText('👑', px, py - pR - 32);
-      }
-
       if (p.bossTelegraph > 0) {
         ctx.save();
         if (p.bossAction === 'crush') {
@@ -1432,11 +1107,6 @@
       if (p.god) {
         ctx.strokeStyle = GOLD; ctx.lineWidth = 2;
         ctx.beginPath(); ctx.arc(px, py, pR + 4 + Math.sin(now / 150) * 2, 0, 6.283); ctx.stroke();
-      }
-      
-      if (p.shield) {
-        ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 3;
-        ctx.beginPath(); ctx.arc(px, py, pR + 10 + Math.sin(now / 200) * 3, 0, 6.283); ctx.stroke();
       }
 
       if (p.tier === 'tetanus') {
