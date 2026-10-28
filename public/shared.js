@@ -38,6 +38,7 @@
     var t = l ? cl(((px - ax) * vx + (py - ay) * vy) / l, 0, 1) : 0;
     return Math.hypot(ax + vx * t - px, ay + vy * t - py);
   }
+  // A stunned fighter cannot parry
   function parrying(p) { return p.st <= 0 && p.pa >= 0 && p.pa < PAR; }
 
   function reset(m) {

@@ -611,7 +611,8 @@
           result('Extracted!', 'Secured ' + (d.kills || 0) + ' Kills.', 'Banked to rank: ' + (d.delta > 0 ? '+' : '') + d.delta + ' MMR', (d.delta > 0 ? '+' : '') + d.delta + ' MMR', 'win');
         } else {
           var penaltyTxt = (d.delta && d.delta < 0) ? 'Penalty applied for dying with under 5 kills.' : 'All unbanked Essence was lost.';
-          result('Defeated', 'You failed to extract.', penaltyTxt, d.delta ? d.delta + ' MMR' : '', 'lose');
+          var mmrStr = d.delta ? d.delta + ' MMR' : '';
+          result('Defeated', 'You failed to extract.', penaltyTxt, mmrStr, 'lose');
         }
         return;
       }
@@ -866,19 +867,18 @@
     });
   };
   
-  $('admAnnounceBtn').onclick = function() {
-    var msg = $('admAnnounceText').value.trim();
-    if (!msg) return;
-    sock.emit('admin_announce', { message: msg }, function(r) {
-      if (r && r.ok) {
-        toast('Announcement sent');
-        $('admAnnounceText').value = '';
-      }
-    });
-  };
-  
   var annText = $('admAnnounceText');
   if (annText) {
+    $('admAnnounceBtn').onclick = function() {
+      var msg = annText.value.trim();
+      if (!msg) return;
+      sock.emit('admin_announce', { message: msg }, function(r) {
+        if (r && r.ok) {
+          toast('Announcement sent');
+          annText.value = '';
+        }
+      });
+    };
     annText.addEventListener('keydown', function(e) { if (e.key === 'Enter') $('admAnnounceBtn').click(); });
   }
 
