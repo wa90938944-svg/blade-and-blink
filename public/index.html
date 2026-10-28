@@ -50,12 +50,12 @@ body::before{
 }
 
 #wrap{
-  position:relative;
   width:min(94vw,calc((100vh - 130px)*1.55));
   width:min(94vw,calc((100dvh - 130px)*1.55));
   border:3px solid var(--bone);
   box-shadow:8px 8px 0 var(--red), 0 18px 40px rgba(0,0,0,.65);
   background:var(--paper);
+  transition:box-shadow .2s ease;
 }
 
 #hud{
@@ -80,15 +80,20 @@ canvas{display:block;width:100%;height:auto;background:var(--paper)}
 #ov{
   position:absolute;
   inset:0;
-  background:rgba(18,16,14,.96);
+  background:
+    radial-gradient(circle at 50% 20%, rgba(42,35,28,.45) 0%, rgba(16,14,12,.97) 75%),
+    repeating-linear-gradient(0deg, rgba(255,255,255,.012) 0px, rgba(255,255,255,.012) 1px, transparent 1px, transparent 3px);
   display:flex;
   align-items:center;
   justify-content:center;
-  padding:16px;
-  overflow-y:auto;
-  z-index:40;
+  padding:12px;
+  overflow:auto;
 }
 
+@keyframes screenIn{
+  from{opacity:0;transform:translateY(6px) scale(.985)}
+  to{opacity:1;transform:translateY(0) scale(1)}
+}
 .screen{
   display:none;
   flex-direction:column;
@@ -96,11 +101,12 @@ canvas{display:block;width:100%;height:auto;background:var(--paper)}
   gap:11px;
   text-align:center;
   width:100%;
-  max-width:440px;
+  max-width:420px;
   margin:auto;
 }
 .screen.on{
-  display:flex !important;
+  display:flex;
+  animation:screenIn .18s cubic-bezier(.16,1,.3,1) forwards;
 }
 
 h1,h2{font-family:var(--disp);font-weight:400;margin:0;line-height:1.05;text-shadow:3px 3px 0 #000}
@@ -109,20 +115,20 @@ h1 span{color:var(--red)}
 h2{font-size:clamp(24px,4.8vw,36px)}
 p{margin:0;color:var(--dim);font-size:16px;line-height:1.35}
 
-input,select,textarea{
+input,select{
   width:100%;
-  font:600 20px var(--ui);
+  font:600 21px var(--ui);
   letter-spacing:.04em;
   color:var(--bone);
   background:#0d0b09;
   border:2px solid var(--bone);
   border-radius:0;
-  padding:8px 12px;
+  padding:10px 14px;
   text-align:center;
   box-shadow:inset 0 2px 5px rgba(0,0,0,.6);
+  transition:border-color .15s, box-shadow .15s;
 }
-textarea{font-size:15px;resize:vertical;min-height:65px;text-align:left}
-input:focus,select:focus,textarea:focus{
+input:focus,select:focus{
   outline:none;
   border-color:var(--gold);
   box-shadow:0 0 0 2px rgba(217,165,38,.25), inset 0 2px 5px rgba(0,0,0,.6);
@@ -131,18 +137,18 @@ input:disabled{opacity:.6}
 
 button{
   position:relative;
-  font:700 18px var(--ui);
+  font:700 19px var(--ui);
   letter-spacing:.09em;
   text-transform:uppercase;
   color:var(--bone);
   background:var(--red);
   border:2px solid var(--red);
   border-radius:0;
-  padding:9px 14px;
+  padding:10px 16px;
   cursor:pointer;
   width:100%;
   box-shadow:3px 3px 0 #000;
-  transition:transform .1s cubic-bezier(.2,.8,.2,1), box-shadow .1s cubic-bezier(.2,.8,.2,1);
+  transition:transform .1s cubic-bezier(.2,.8,.2,1), box-shadow .1s cubic-bezier(.2,.8,.2,1), background-color .15s, border-color .15s, color .15s;
 }
 button:hover:not(:disabled){
   transform:translate(-2px,-2px);
@@ -169,7 +175,7 @@ button.ghost{
   box-shadow:none;
   color:var(--dim);
   font-weight:500;
-  font-size:15px;
+  font-size:16px;
   letter-spacing:.02em;
   text-transform:none;
   width:auto;
@@ -183,125 +189,148 @@ button.ghost:hover:not(:disabled){
   box-shadow:none;
 }
 button:disabled{opacity:.35;cursor:not-allowed;box-shadow:none}
+button:focus-visible{outline:3px solid var(--gold);outline-offset:3px}
 
-.row{display:flex;gap:8px;width:100%}
-.err{color:var(--redhi);font-size:15px;min-height:18px}
+.row{display:flex;gap:10px;width:100%}
+.err{color:var(--redhi);font-size:16px;min-height:20px}
 
+/* Tactile Profile Card */
 #card{
   display:flex;
-  gap:12px;
+  gap:14px;
   align-items:center;
   width:100%;
   background:linear-gradient(135deg, #221e19 0%, #161310 100%);
   border:2px solid var(--line);
   box-shadow:inset 0 1px 0 rgba(255,255,255,.06), 3px 3px 0 #000;
-  padding:10px 14px;
+  padding:11px 14px;
   text-align:left;
+}
+@keyframes badgeFloat{
+  0%,100%{transform:rotate(-5deg) translateY(0)}
+  50%{transform:rotate(-3deg) translateY(-2px)}
 }
 #badge{
   --rc:#cd7f32;
   flex:none;
-  width:50px;
-  height:50px;
+  width:54px;
+  height:54px;
   border:3px solid var(--rc);
   color:var(--rc);
   background:rgba(0,0,0,.35);
   display:flex;
   align-items:center;
   justify-content:center;
-  font:400 24px var(--disp);
+  font:400 25px var(--disp);
   transform:rotate(-5deg);
+  animation:badgeFloat 3.6s ease-in-out infinite;
 }
 #info{flex:1;min-width:0}
-#uname{font-weight:700;font-size:21px;letter-spacing:.04em;text-transform:uppercase;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-#rline{font-size:15px;color:var(--dim)}
+#uname{font-weight:700;font-size:22px;letter-spacing:.04em;text-transform:uppercase;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#rline{font-size:16px;color:var(--dim)}
 #rname{font-weight:700;text-transform:uppercase;letter-spacing:.06em}
-#bar{height:7px;background:#2a251f;margin:5px 0 3px;overflow:hidden}
-#prog{height:100%;width:0;background:var(--gold)}
-#sub{display:flex;justify-content:space-between;font-size:13px;color:var(--dim)}
+#bar{height:8px;background:#2a251f;margin:6px 0 3px;overflow:hidden}
+#prog{height:100%;width:0;background:var(--gold);transition:width .35s ease}
+#sub{display:flex;justify-content:space-between;font-size:14px;color:var(--dim)}
 
-.tier-btn{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;padding:8px 4px;font-size:16px}
-.tier-btn small{font:600 11px var(--ui);color:var(--dim);text-transform:uppercase}
-.tier-btn:hover:not(:disabled) small{color:var(--ink)}
+/* CPU Tier Buttons */
+.tier-btn{
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  gap:2px;
+  padding:9px 6px;
+  font-size:17px;
+}
+.tier-btn small{
+  font:600 11px var(--ui);
+  letter-spacing:.05em;
+  color:var(--dim);
+  text-transform:uppercase;
+  transition:color .12s;
+}
+.tier-btn:hover:not(:disabled) small{
+  color:var(--ink);
+}
 
-.big-opt{padding:12px 14px;font-size:20px;letter-spacing:.08em;display:flex;flex-direction:column;gap:2px;align-items:center;justify-content:center}
-.big-opt small{font-size:13px;color:var(--dim);font-weight:500;text-transform:none}
+/* Big Button Styling for Co-op & Modes */
+.big-opt{padding:13px 16px;font-size:21px;letter-spacing:.08em;display:flex;flex-direction:column;gap:3px;align-items:center;justify-content:center}
+.big-opt small{font-size:13px;letter-spacing:.04em;text-transform:none;color:var(--dim);font-weight:500;transition:color .12s}
 .big-opt:hover:not(:disabled) small{color:var(--ink)}
 
-/* Top-Right Dedicated Admin Bar */
-#adminbar{position:fixed;top:12px;right:14px;z-index:90}
-#adminbtn{background:#000;color:var(--gold);border:2px solid var(--gold);padding:6px 14px;font:700 15px var(--ui);letter-spacing:.08em;width:auto;cursor:pointer;box-shadow:3px 3px 0 #000}
+/* Top Right Fixed Admin Button */
+#adminbar{position:fixed;top:12px;right:14px;z-index:60}
+#adminbtn{background:#000;color:var(--gold);border:2px solid var(--gold);padding:6px 14px;font:700 16px var(--ui);letter-spacing:.08em;width:auto;cursor:pointer;box-shadow:3px 3px 0 #000}
 #adminbtn:hover{background:var(--gold);color:#000;border-color:var(--bone)}
 
-/* List Styling */
-ul.admin-list, div.admin-list{list-style:none;margin:0;padding:0;width:100%;max-height:240px;overflow-y:auto;text-align:left;border:2px solid var(--line);background:var(--panel)}
-.adm-li{display:flex;justify-content:space-between;align-items:center;padding:8px 10px;border-bottom:1px solid var(--line);gap:8px}
-.adm-li:hover{background:var(--panel-hi)}
-.adm-li-info{display:flex;flex-direction:column;flex:1;min-width:0}
-.adm-li-title{font-weight:700;font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.adm-li-sub{font-size:13px;color:var(--dim)}
-.adm-li-btn{width:auto;padding:4px 10px;font-size:13px}
-.adm-report-box{padding:8px 10px;border-bottom:1px solid var(--line);background:rgba(201,51,31,0.08);text-align:left}
-.tag{font-size:10px;padding:2px 4px;border-radius:2px;font-weight:700;margin-left:5px;vertical-align:middle;display:inline-block}
-.tag-owner{background:#b8891f;color:#000}
-.tag-admin{background:#8fbfb4;color:#000}
-.tag-banned{background:#8b0000;color:#fff}
+/* Admin Panel Table & Tools */
+.adm-user-row{display:flex;align-items:center;justify-content:space-between;padding:6px 8px;border-bottom:1px solid var(--line);gap:6px}
+.adm-user-row input{width:70px;padding:3px;font-size:14px}
+.adm-user-row button{width:auto;padding:3px 8px;font-size:12px}
 
-.spin{width:46px;height:46px;border:4px solid var(--line);border-top-color:var(--red);border-radius:50%;animation:sp 1s linear infinite}
+.spin{width:50px;height:50px;border:5px solid var(--line);border-top-color:var(--red);border-radius:50%;animation:sp 1s linear infinite}
 @keyframes sp{to{transform:rotate(360deg)}}
-#qt{font:400 36px var(--disp);font-variant-numeric:tabular-nums}
-#rdelta{font:400 28px var(--disp)}
+@media (prefers-reduced-motion:reduce){.spin{animation-duration:4s}#badge{animation:none}.screen.on{animation:none}}
+#qt{font:400 38px var(--disp);font-variant-numeric:tabular-nums}
+#rdelta{font:400 30px var(--disp)}
 #rdelta.up{color:#9bbf5b}#rdelta.down{color:var(--redhi)}
-#legend{font-size:14px;color:var(--dim);text-align:center;padding:0 8px}
+#legend{font-size:15px;color:var(--dim);text-align:center;padding:0 8px;letter-spacing:.02em}
 [hidden]{display:none!important}
-#tools{display:flex;gap:16px;align-items:center;justify-content:center;font-size:14px;color:var(--dim);min-height:24px}
-#tools .ghost{font-size:14px}
+#tools{display:flex;gap:18px;align-items:center;justify-content:center;font-size:15px;color:var(--dim);min-height:26px}
+#tools .ghost{font-size:15px}
 #forfeit{color:var(--redhi)}
-#forfeit.arm{background:var(--red);color:var(--bone);text-decoration:none;padding:2px 10px}
-
+#forfeit.arm{background:var(--red);color:var(--bone);text-decoration:none;padding:3px 12px}
 #boardlist,#partymembers{list-style:none;margin:0;padding:0;width:100%;max-height:220px;overflow:auto;text-align:left;border:2px solid var(--line);background:var(--panel)}
-#boardlist li,#partymembers li{display:flex;justify-content:space-between;gap:12px;padding:6px 10px;border-bottom:1px solid var(--line);font-weight:600;letter-spacing:.04em;text-transform:uppercase}
+#boardlist li,#partymembers li{display:flex;justify-content:space-between;gap:12px;padding:7px 10px;border-bottom:1px solid var(--line);font-weight:600;letter-spacing:.04em;text-transform:uppercase}
 #boardlist li.me{background:var(--panel-hi);color:var(--gold)}
-.stats{min-height:18px;font-size:13px;color:var(--dim)}
+.stats{min-height:20px;font-size:14px}
 
-#pad{width:min(94vw,520px);display:flex;justify-content:space-between;align-items:center;gap:10px;touch-action:none}
-#stick{position:relative;flex:none;width:clamp(104px,32vw,150px);aspect-ratio:1;border:2px solid var(--bone);border-radius:50%;background:rgba(27,24,20,.88);box-shadow:3px 3px 0 var(--red)}
-#knob{position:absolute;left:50%;top:50%;width:44%;height:44%;margin:-22% 0 0 -22%;border-radius:50%;background:var(--ink);border:2px solid var(--bone)}
+#pad{width:min(94vw,520px);display:flex;justify-content:space-between;align-items:center;gap:10px;touch-action:none;-webkit-touch-callout:none}
+#stick{position:relative;flex:none;width:clamp(104px,32vw,150px);aspect-ratio:1;border:3px solid var(--bone);border-radius:50%;background:rgba(27,24,20,.88);box-shadow:4px 4px 0 var(--red);touch-action:none}
+#stick::before,#stick::after{content:"";position:absolute;background:var(--line)}
+#stick::before{left:50%;top:14%;bottom:14%;width:2px;margin-left:-1px}
+#stick::after{top:50%;left:14%;right:14%;height:2px;margin-top:-1px}
+#knob{position:absolute;left:50%;top:50%;width:44%;height:44%;margin:-22% 0 0 -22%;border-radius:50%;background:var(--ink);border:3px solid var(--bone);box-shadow:2px 2px 0 #000}
 #btns{display:flex;gap:clamp(6px,2vw,12px);align-items:flex-end}
-.tb{width:clamp(56px,17vw,76px);height:clamp(56px,17vw,76px);padding:4px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;background:var(--ink);border:2px solid var(--bone);box-shadow:3px 3px 0 #000;font:700 12px var(--ui);letter-spacing:.08em;text-transform:uppercase;color:var(--bone)}
+.tb{width:clamp(56px,17vw,76px);height:clamp(56px,17vw,76px);padding:4px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;background:var(--ink);border:3px solid var(--bone);border-radius:0;box-shadow:3px 3px 0 #000;rotate:-3deg;font:700 12px var(--ui);letter-spacing:.08em;text-transform:uppercase;color:var(--bone);touch-action:none;user-select:none;-webkit-user-select:none}
+.tb:nth-child(2){rotate:2deg}
 .tb.red{background:var(--red)}
-.tb svg{width:42%;height:42%;fill:none;stroke:var(--bone);stroke-width:2.2}
+.tb svg{width:42%;height:42%;fill:none;stroke:var(--bone);stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
 .tb b{color:var(--gold);font-weight:700}
 .tb.red b{color:var(--bone)}
 .tb.down{translate:2px 2px;box-shadow:1px 1px 0 #000}
 .tb.cd{opacity:.4}
 
-#toast{
-  position:fixed;
-  z-index:99;
-  left:50%;
-  top:calc(12px + env(safe-area-inset-top,0px));
-  transform:translateX(-50%) rotate(-1deg);
-  background:#0a0807;
-  color:#fff;
-  border:2px solid #fff;
-  box-shadow:4px 4px 0 var(--red);
-  padding:8px 16px;
-  font:400 clamp(15px,4.2vw,20px) var(--disp);
-  letter-spacing:.03em;
-  text-transform:uppercase;
-  pointer-events:none;
+@media (pointer:coarse){
+  body{padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);gap:8px;overscroll-behavior:none;-webkit-touch-callout:none;height:100dvh}
+  #ov{position:fixed;z-index:30;padding:max(12px,env(safe-area-inset-top)) 12px max(12px,env(safe-area-inset-bottom))}
+  #tools .ghost{min-height:36px}
+  button{touch-action:manipulation}
+  canvas{touch-action:none}
 }
-#toast.bad{background:var(--red);box-shadow:4px 4px 0 #000}
+@media (pointer:coarse) and (orientation:landscape){
+  #wrap{width:min(94vw,calc((100dvh - 90px)*1.55))}
+  #pad:not([hidden]){position:fixed;left:0;right:0;bottom:0;width:auto;align-items:flex-end;padding:0 calc(14px + env(safe-area-inset-right)) calc(10px + env(safe-area-inset-bottom)) calc(14px + env(safe-area-inset-left));pointer-events:none}
+  #pad > *{pointer-events:auto}
+  #stick{width:clamp(92px,26vh,128px)}
+  #btns{flex-direction:column;flex-wrap:nowrap;gap:8px;width:auto}
+  .tb{width:clamp(50px,15vh,64px);height:clamp(50px,15vh,64px)}
+  #tbBlink{order:1}#tbParry{order:2}#tbSwing{order:3}
+}
+@media (max-width:480px){#hud{font-size:16px;padding:5px 10px}#rnd{font-size:11px}}
+#toast{position:fixed;z-index:70;left:50%;top:calc(14px + env(safe-area-inset-top,0px));transform:translateX(-50%) rotate(-1.5deg);background:#000;color:#fff;border:4px solid #fff;box-shadow:6px 6px 0 var(--red);padding:10px 18px;font:400 clamp(16px,4.6vw,22px) var(--disp);letter-spacing:.03em;text-transform:uppercase;white-space:nowrap;pointer-events:none}
+#toast.bad{background:var(--red);box-shadow:6px 6px 0 #000}
 
 #lookgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;width:100%}
-.look{display:flex;flex-direction:column;align-items:center;gap:2px;padding:6px 4px;background:var(--panel);border:2px solid var(--line);color:var(--bone);font:600 14px var(--ui)}
-.look canvas{width:60px;height:60px;border:1px solid var(--line)}
+.look{display:flex;flex-direction:column;align-items:center;gap:1px;padding:6px 4px;background:var(--panel);border:2px solid var(--line);color:var(--bone);box-shadow:none;text-transform:none;letter-spacing:.03em;font:600 15px var(--ui)}
+.look canvas{width:62px;height:62px;border:1px solid var(--line)}
 .look small{font:500 12px var(--ui);color:var(--dim)}
 .look.sel{border-color:var(--red)}
 .look.sel small{color:var(--gold)}
-.look:disabled{opacity:.5}
-#lookinfo{min-height:32px}
+.look:disabled{opacity:.55}
+#lookinfo{min-height:36px}
+@media (max-height:560px){#lookgrid{grid-template-columns:repeat(6,1fr)}.look canvas{width:44px;height:44px}.look small{display:none}}
 </style>
 </head>
 <body>
@@ -314,9 +343,9 @@ ul.admin-list, div.admin-list{list-style:none;margin:0;padding:0;width:100%;max-
       <div class="screen on" id="login">
         <h1>Blade <span>&amp;</span> Blink</h1>
         <p id="authSub">Log in to climb the ranked ladder.</p>
-        <input id="name" maxlength="16" placeholder="Username" autocomplete="username">
-        <input id="pass" type="password" maxlength="128" placeholder="Password" autocomplete="current-password">
-        <input id="pass2" type="password" maxlength="128" placeholder="Repeat password" autocomplete="new-password" hidden>
+        <input id="name" maxlength="16" placeholder="Username" autocomplete="username" aria-label="Username">
+        <input id="pass" type="password" maxlength="128" placeholder="Password" autocomplete="current-password" aria-label="Password">
+        <input id="pass2" type="password" maxlength="128" placeholder="Repeat password" autocomplete="new-password" aria-label="Repeat password" hidden>
         <div class="err" id="err" role="alert"></div>
         <button id="enter">Log in</button>
         <button class="ghost" id="switch">New here? Create an account</button>
@@ -350,10 +379,22 @@ ul.admin-list, div.admin-list{list-style:none;margin:0;padding:0;width:100%;max-
       <div class="screen" id="coopmenu">
         <h2>Co-op &amp; Modes</h2>
         <p>Choose an arena mode or party with friends.</p>
-        <button class="sec big-opt" id="coop2v2btn">Duel 2v2<small>Team up: 2 Black vs 2 Red fighters</small></button>
-        <button class="sec big-opt" id="coopextractbtn">Shrine Extraction<small>FFA Arena: bank ink essence to rank up</small></button>
-        <button class="sec big-opt" id="cooppartybtn">Private Party<small>Custom room code lobbies with friends</small></button>
-        <button class="sec big-opt" id="cooplocalbtn">2 Players, 1 Keyboard<small>Local shared screen duel</small></button>
+        <button class="sec big-opt" id="coop2v2btn">
+          Duel 2v2
+          <small>Team up: 2 Black vs 2 Red fighters</small>
+        </button>
+        <button class="sec big-opt" id="coopextractbtn">
+          Shrine Extraction
+          <small>FFA Arena: gather Essence, channel, and bank rank points</small>
+        </button>
+        <button class="sec big-opt" id="cooppartybtn">
+          Private Party
+          <small>Custom room code lobbies with friends</small>
+        </button>
+        <button class="sec big-opt" id="cooplocalbtn">
+          2 Players, 1 Keyboard
+          <small>Classic local battle on a shared screen</small>
+        </button>
         <button class="ghost" id="coopback">Back to Lobby</button>
       </div>
 
@@ -380,69 +421,24 @@ ul.admin-list, div.admin-list{list-style:none;margin:0;padding:0;width:100%;max-
         <button class="sec" id="partyleave">Leave Party</button>
       </div>
 
-      <!-- SEPARATE ADMIN SCREENS -->
-      <div class="screen" id="adminhub">
+      <!-- Admin Authority Panel -->
+      <div class="screen" id="adminpanel">
         <h2 style="color:var(--gold)">Admin Authority</h2>
-        <p>Select a management section:</p>
-        <button id="navDb" style="padding:12px;font-size:19px;margin-top:6px">Player Database</button>
-        <button id="navLedger" class="sec" style="padding:12px;font-size:19px">Ban Ledger &amp; Reports</button>
-        <button class="ghost" id="adminHubClose" style="margin-top:6px">Return to Lobby</button>
-      </div>
-
-      <div class="screen" id="admindb">
-        <h2 style="color:var(--gold)">Player Database</h2>
-        <input id="admSearch" placeholder="Type to filter players...">
-        <ul class="admin-list" id="adminUserList"></ul>
-        <button class="sec" id="dbBack">Back to Hub</button>
-      </div>
-
-      <div class="screen" id="adminmanage">
-        <h2 id="mgrName" style="color:var(--gold)">Player</h2>
-        <p id="mgrRank">Rank / MMR</p>
-        <div id="mgrOwnerTools" hidden style="width:100%;display:flex;flex-direction:column;gap:8px">
-          <div class="row">
-            <input type="number" id="mgrMmrInp" placeholder="MMR">
-            <button id="mgrSaveMmr">Set MMR</button>
-          </div>
-          <button class="sec" id="mgrPromote">Promote to Admin</button>
-        </div>
-        <div id="mgrBanArea" style="width:100%;border-top:2px dashed var(--line);margin-top:8px;padding-top:8px">
-          <textarea id="mgrBanReason" placeholder="Detailed reason for banning this account..."></textarea>
-          <div class="row" style="margin-top:6px">
-            <button id="mgrBanBtn" style="background:var(--redhi)">Ban Account</button>
-            <button id="mgrUnbanBtn" style="background:var(--gold);color:#000" hidden>Unban Account</button>
-          </div>
-        </div>
-        <button class="sec" id="mgrBack" style="margin-top:6px">Back to Database</button>
-      </div>
-
-      <div class="screen" id="adminledger">
-        <h2 style="color:var(--redhi)">Ban Ledger</h2>
-        <ul id="adminReportsList" class="admin-list"></ul>
-        <button class="sec" id="ledgerBack">Back to Hub</button>
-      </div>
-
-      <div class="screen" id="admincheats">
-        <h2 style="color:var(--redhi)">Live Match Cheats</h2>
-        <div class="row">
-          <button class="sec" id="admGod">Invuln: OFF</button>
-          <button class="sec" id="admNoCd">No CD: OFF</button>
-        </div>
-        <div class="row">
-          <button class="sec" id="admSpeed">2x Speed: OFF</button>
-          <button class="sec" id="admHeal">Refill Lives</button>
-        </div>
-        <div id="admOwnerCheats" hidden style="display:flex;flex-direction:column;gap:8px;margin-top:6px;padding-top:6px;border-top:2px dashed var(--line);width:100%">
-          <p style="color:var(--gold);font-weight:700">OWNER EXCLUSIVE</p>
-          <button id="admFightTetanus" style="background:#580a06;color:var(--bone);border-color:var(--redhi)">Morph: Play as Tetanus</button>
-          <button id="admSpawnGuard" style="background:#b8891f;color:#000;border-color:var(--bone)">Spawn Guard (P)</button>
+        <button id="admFightTetanus" style="background:#580a06;color:var(--bone);border-color:var(--redhi)">Fight Secret Boss: Tetanus</button>
+        <div id="adminMatchTools" hidden style="width:100%;display:flex;flex-direction:column;gap:8px">
+          <p style="color:var(--redhi);font-weight:700">IN-MATCH CHEATS</p>
+          <button id="admSpawnGuard" style="background:#b8891f;color:#000;border-color:var(--bone)">Spawn CPU Bodyguard (P)</button>
           <button id="admKillAll" style="background:#8b0000;border-color:#ff4444">Instant Kill Enemies</button>
           <div class="row">
-            <input id="admAnnounceText" placeholder="Server Broadcast...">
-            <button class="sec" id="admAnnounceBtn">Send</button>
+            <button class="sec" id="admGod">Invulnerability: OFF</button>
+            <button class="sec" id="admNoCd">No Cooldowns: OFF</button>
           </div>
         </div>
-        <button class="ghost" id="cheatsClose" style="margin-top:6px">Resume Match</button>
+        <div id="adminMenuTools" style="width:100%;display:flex;flex-direction:column;gap:8px">
+          <p style="color:var(--gold);font-weight:700">PLAYER DATABASE &amp; MONETIZATION</p>
+          <div id="adminUserList" style="max-height:220px;overflow-y:auto;border:2px solid var(--line);background:var(--panel);width:100%;text-align:left;font-size:14px"></div>
+        </div>
+        <button class="sec" id="adminClose">Close</button>
       </div>
 
       <div class="screen" id="queue">
@@ -479,9 +475,9 @@ ul.admin-list, div.admin-list{list-style:none;margin:0;padding:0;width:100%;max-
 <div id="pad" hidden>
   <div id="stick" aria-label="Move"><div id="knob"></div></div>
   <div id="btns">
-    <button class="tb" id="tbParry" aria-label="Parry"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="7.5"/><circle cx="12" cy="12" r="2.8"/></svg><span>Parry</span></button>
-    <button class="tb" id="tbSwing" aria-label="Swing"><svg viewBox="0 0 24 24"><path d="M4 20 Q7 6 20 4"/><path d="M4 20 L2.5 21.5"/></svg><span>Swing</span></button>
-    <button class="tb red" id="tbBlink" aria-label="Blink"><svg viewBox="0 0 24 24"><path d="M5 6 L12 12 L5 18"/><path d="M13 6 L20 12 L13 18"/></svg><span>Blink <b id="chn">3</b></span></button>
+    <button class="tb" id="tbParry" aria-label="Parry"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7.5"/><circle cx="12" cy="12" r="2.8"/></svg><span>Parry</span></button>
+    <button class="tb" id="tbSwing" aria-label="Swing"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20 Q7 6 20 4"/><path d="M4 20 L2.5 21.5"/></svg><span>Swing</span></button>
+    <button class="tb red" id="tbBlink" aria-label="Blink"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 6 L12 12 L5 18"/><path d="M13 6 L20 12 L13 18"/></svg><span>Blink <b id="chn">3</b></span></button>
   </div>
 </div>
 <div id="tools"><button class="ghost" id="mute">Sound on</button><span id="ping"></span><button class="ghost" id="forfeit" hidden>Forfeit</button></div>
