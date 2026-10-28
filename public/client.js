@@ -192,34 +192,28 @@
     var baseR = p.r || (R * 2.2);
     var pu = 0.5 + 0.5 * Math.sin(now / 260);
 
-    // Menacing dark crimson aura
     g.strokeStyle = 'rgba(139, 12, 8, ' + (0.22 + 0.18 * pu).toFixed(2) + ')';
     g.lineWidth = 4;
     g.beginPath(); g.arc(px, py, baseR + 8 + pu * 4, 0, 6.283); g.stroke();
 
-    // Deep dark-red body
     g.fillStyle = p.st > 0 ? '#7a524c' : '#580a06';
     g.beginPath(); g.arc(px, py, baseR, 0, 6.283); g.fill();
     g.strokeStyle = '#191514'; g.lineWidth = 4; g.stroke();
 
-    // Sclera (sharp central eye)
     var eyeR = baseR * 0.46;
     g.fillStyle = '#efe6d2';
     g.beginPath(); g.arc(px, py, eyeR, 0, 6.283); g.fill();
     g.strokeStyle = '#191514'; g.lineWidth = 2; g.stroke();
 
-    // Tracking pupil
     var target = (M && M.p[0] && !M.p[0].dead) ? M.p[0] : { x: px + Math.cos(fa) * 40, y: py + Math.sin(fa) * 40 };
     var disp0 = disp[0] || target;
     var ang = Math.atan2(disp0.y - py, disp0.x - px);
     var off = eyeR * 0.38;
     var ex = px + Math.cos(ang) * off, ey = py + Math.sin(ang) * off;
 
-    // Crimson iris
     g.fillStyle = '#c9331f';
     g.beginPath(); g.arc(ex, ey, eyeR * 0.48, 0, 6.283); g.fill();
 
-    // Sharp vertical slit pupil
     g.save();
     g.translate(ex, ey);
     g.rotate(ang);
@@ -229,7 +223,6 @@
     g.fill();
     g.restore();
 
-    // Massive Boss Blade
     var ca = Math.cos(fa), sa = Math.sin(fa);
     var x0 = px + ca * baseR * 0.4, y0 = py + sa * baseR * 0.4;
     var x1 = px + ca * (baseR + 30), y1 = py + sa * (baseR + 30);
@@ -315,6 +308,7 @@
     sv.x = 0; sv.y = 0; sid = null; $('knob').style.transform = '';
     disarm();
   }
+  
   function showLobby() {
     $('card').style.display = prof ? '' : 'none';
     $('rank').disabled = !prof;
@@ -327,9 +321,10 @@
     $('savebtn').hidden = !prof;
     $('logout').hidden = !prof;
     $('cooplocalbtn').hidden = touch;
-    $('adminbar').hidden = !(prof && prof.isOwner);
+    $('adminbar').hidden = !(prof && (prof.isOwner || prof.isAdmin));
     show('lobby');
   }
+  
   function setProfile(p) {
     prof = p;
     var r = RANKS.filter(function (x) { return x.n === p.rank; })[0] || RANKS[0];
@@ -345,7 +340,7 @@
     $('prog').style.width = (hasNext ? Math.min(1, (p.mmr - r.min) / (r.next - r.min)) * 100 : 100) + '%';
     $('prog').style.background = r.c;
     $('nextlbl').textContent = p.isOwner ? 'Infinite Reign' : (hasNext ? (r.next - p.mmr) + ' to ' + RANKS[RANKS.indexOf(r) + 1].n : 'Top rank');
-    $('adminbar').hidden = !p.isOwner;
+    $('adminbar').hidden = !(p.isOwner || p.isAdmin);
   }
 
   function result(title, d1, d2, delta, sound) {
@@ -574,33 +569,45 @@
 
   // ---------- Admin Panel Interactions ----------
   $('adminbtn').onclick = function () {
-    if (!prof || !prof.isOwner) return;
+    if (!prof || (!prof.isOwner && !prof.isAdmin)) return;
     var inMatch = !!mode;
     $('adminMatchTools').hidden = !inMatch;
     $('adminMenuTools').hidden = inMatch;
-    if (!inMatch) loadAdminUserList();
+    $('ownerCheats').style.display = (inMatch && prof.isOwner) ? 'flex' : 'none';
+    $('admBecomeTetanus').style.display = (inMatch && prof.isOwner) ? 'block' : 'none';
+    if (!inMatch) {
+      $('admSearch').value = '';
+      loadAdminUserList('');
+    }
     show('adminpanel');
   };
+  
   $('adminClose').onclick = function () {
     if (mode) show(null);
     else showLobby();
   };
+  
   $('admFightTetanus').onclick = function () {
-    if (!prof || !prof.isOwner) return;
+    if (!prof || (!prof.isOwner && !prof.isAdmin)) return;
     startBotDuel('tetanus');
   };
 
-  function loadAdminUserList() {
+  $('admSearchBtn').onclick = function() { loadAdminUserList($('admSearch').value); };
+  $('admSearch').addEventListener('keydown', function(e) { if (e.key === 'Enter') $('admSearchBtn').click(); });
+
+  function loadAdminUserList(searchStr) {
     var list = $('adminUserList');
     list.innerHTML = '<div style="padding:10px;text-align:center">Loading user records...</div>';
-    sock.emit('admin_get_users', function (r) {
+    sock.emit('admin_get_users', { search: searchStr }, function (r) {
       if (!r || !r.ok) { list.innerHTML = '<div style="padding:10px;color:var(--redhi)">Failed to load data</div>'; return; }
       list.innerHTML = '';
       r.users.forEach(function (u) {
         var row = document.createElement('div');
         row.className = 'adm-user-row';
-        row.innerHTML = '<div><b>' + u.name + '</b> <small>(' + u.rank + ', ' + u.mmr + ' MMR' + (u.banned ? ' - <span style="color:var(--redhi)">BANNED</span>' : '') + ')</small></div>' +
-          '<div style="display:flex;gap:4px;align-items:center">' +
+        var adminHtml = (prof.isOwner && !u.isOwner) ? '<button class="sec" style="background:var(--gold);color:#000" id="prom_' + u.key + '">' + (u.isAdmin ? 'Demote' : 'Promote') + '</button>' : '';
+        row.innerHTML = '<div><b>' + u.name + '</b> <small>(' + u.rank + ', ' + u.mmr + ' MMR' + (u.banned ? ' - <span style="color:var(--redhi)">BANNED</span>' : '') + (u.isAdmin ? ' - <span style="color:var(--gold)">ADMIN</span>' : '') + ')</small></div>' +
+          '<div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;margin-top:4px">' +
+          adminHtml +
           '<input type="number" id="mmr_' + u.key + '" placeholder="MMR" value="' + u.mmr + '">' +
           '<button class="sec" id="setmmr_' + u.key + '">Save</button>' +
           '<button style="background:' + (u.banned ? 'var(--gold)' : 'var(--red)') + '" id="ban_' + u.key + '">' + (u.banned ? 'Unban' : 'Ban') + '</button>' +
@@ -608,24 +615,58 @@
         list.appendChild(row);
 
         $('setmmr_' + u.key).onclick = function () {
+          if (!prof.isOwner) return toast('Owner level required to adjust MMR', true);
           var val = $('mmr_' + u.key).value;
           sock.emit('admin_set_mmr', { key: u.key, mmr: val }, function (resp) {
-            if (resp && resp.ok) { toast('MMR Updated (' + resp.mmr + ')'); loadAdminUserList(); }
+            if (resp && resp.ok) { toast('MMR Updated (' + resp.mmr + ')'); loadAdminUserList($('admSearch').value); }
             else toast((resp && resp.err) || 'Error', true);
           });
         };
         $('ban_' + u.key).onclick = function () {
-          sock.emit('admin_set_ban', { key: u.key, banned: !u.banned }, function (resp) {
-            if (resp && resp.ok) { toast(resp.banned ? 'Player Banned' : 'Player Unbanned'); loadAdminUserList(); }
+          var willBan = !u.banned;
+          var reason = '';
+          if (willBan) {
+            reason = prompt('Enter a detailed reason for banning ' + u.name + ':');
+            if (reason === null) return;
+          }
+          sock.emit('admin_set_ban', { key: u.key, banned: willBan, reason: reason }, function (resp) {
+            if (resp && resp.ok) { toast(resp.banned ? 'Player Banned' : 'Player Unbanned'); loadAdminUserList($('admSearch').value); }
             else toast((resp && resp.err) || 'Error', true);
           });
         };
+        if ($('prom_' + u.key)) {
+          $('prom_' + u.key).onclick = function () {
+            sock.emit('admin_set_admin', { key: u.key, isAdmin: !u.isAdmin }, function (resp) {
+              if (resp && resp.ok) { toast(resp.isAdmin ? 'Promoted to Admin' : 'Demoted'); loadAdminUserList($('admSearch').value); }
+              else toast((resp && resp.err) || 'Error', true);
+            });
+          };
+        }
       });
     });
   }
 
+  $('admBansBtn').onclick = function() {
+    var list = $('adminBansList');
+    list.innerHTML = '<div style="padding:10px;text-align:center">Loading reports...</div>';
+    show('adminBanReports');
+    sock.emit('admin_get_bans', function(r) {
+      if (!r || !r.ok) { list.innerHTML = '<span class="err" style="padding:10px">Failed to load</span>'; return; }
+      list.innerHTML = '';
+      if (r.bans.length === 0) list.innerHTML = '<div style="padding:10px">No banned players.</div>';
+      r.bans.forEach(function(b) {
+         var d = document.createElement('div');
+         d.style.cssText = 'padding:6px;border-bottom:1px solid var(--line)';
+         d.innerHTML = '<strong style="color:var(--redhi)">' + b.name + '</strong>: ' + (b.reason || 'No description provided.');
+         list.appendChild(d);
+      });
+    });
+  };
+  
+  $('admBackToPanel').onclick = function() { show('adminpanel'); };
+
   function spawnGuardCmd() {
-    if (!prof || !prof.isOwner || !mode || !M) return;
+    if (!prof || (!prof.isOwner && !prof.isAdmin) || !mode || !M) return;
     if (mode === 'bot' || mode === 'local' || mode === 'endless') {
       var ev = [];
       S.spawnBodyguard(M, 0, ev);
@@ -645,7 +686,7 @@
     if (mode === 'bot' || mode === 'local' || mode === 'endless') {
       if (M) {
         M.p.forEach(function (p, idx) {
-          if (idx !== 0 && p && !p.dead && !p.isMinion) { p.lives = 0; p.hearts = 0; p.dead = true; }
+          if (idx !== 0 && p && !p.dead && !p.isMinion && !p.isOwner) { p.lives = 0; p.hearts = 0; p.dead = true; }
         });
       }
       toast('Annihilated enemies');
@@ -656,6 +697,7 @@
     toast('Annihilated enemies');
     show(null);
   };
+
   $('admGod').onclick = function () {
     if (mode === 'bot' || mode === 'local' || mode === 'endless') {
       if (M && M.p[0]) {
@@ -674,6 +716,7 @@
       toast('God Mode ' + (godActive ? 'Enabled' : 'Disabled'));
     });
   };
+
   $('admNoCd').onclick = function () {
     if (mode === 'bot' || mode === 'local' || mode === 'endless') {
       if (M && M.p[0]) {
@@ -690,6 +733,24 @@
       $('admNoCd').textContent = 'No Cooldowns: ' + (noCdActive ? 'ON' : 'OFF');
       $('admNoCd').style.color = noCdActive ? 'var(--gold)' : 'var(--bone)';
       toast('No Cooldowns ' + (noCdActive ? 'Enabled' : 'Disabled'));
+    });
+  };
+  
+  $('admBecomeTetanus').onclick = function () {
+    if (!prof || !prof.isOwner) return;
+    if (mode === 'bot' || mode === 'local' || mode === 'endless') {
+      if (M && M.p[0]) {
+        var p = M.p[0];
+        p.tier = 'tetanus';
+        p.maxLives = 3; p.lives = 3;
+        p.maxHearts = 5; p.hearts = 5;
+        p.reach = 92; p.scale = 2.2; p.r = 13 * 2.2; p.spd = 175;
+        toast('You are now Tetanus!');
+      }
+      return;
+    }
+    sock.emit('admin_become_tetanus', function (r) {
+      if (r && r.ok) toast('You are now Tetanus!');
     });
   };
 
@@ -1098,7 +1159,7 @@
     if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT')) return;
     var k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
     if (k === 'm' && typeof Sfx !== 'undefined') { Sfx.toggle(); syncMute(); return; }
-    if (k === 'p' && prof && prof.isOwner && mode) {
+    if (k === 'p' && prof && (prof.isOwner || prof.isAdmin) && mode) {
       spawnGuardCmd();
       return;
     }
@@ -1352,7 +1413,6 @@
       var pReach = p.reach || S.REACH;
       var pR = p.r || R;
 
-      // Boss Telegraph Warning Indicator
       if (p.bossTelegraph > 0) {
         ctx.save();
         if (p.bossAction === 'crush') {
@@ -1448,7 +1508,6 @@
         drawBlade(ctx, look, px, py, p.fa, c, p.sc > 0);
       }
 
-      // Overhead Lives & Hearts Bar for Multi-Life / Multi-Heart fighters
       if ((p.tier && p.tier !== 'player') || p.maxLives > 1) {
         var barW = Math.max(36, pR * 2.2);
         var sx = px - barW / 2;
@@ -1477,7 +1536,6 @@
 
     ctx.restore();
 
-    // Screen-Space UI overlays
     var selfP = M.p[me || 0];
     if (selfP && !selfP.dead && (!M.endless || me === 0)) {
       var bx = 20;
@@ -1497,7 +1555,6 @@
     ctx.drawImage(vigC, 0, 0);
     ctx.globalAlpha = 0.6; ctx.drawImage(grainC, 0, 0); ctx.globalAlpha = 1;
 
-    // Secret Boss Dialogue Banner
     if (bossDialogueT > 0) {
       ctx.save();
       ctx.fillStyle = 'rgba(18, 12, 10, 0.92)';
