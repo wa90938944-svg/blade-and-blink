@@ -72,6 +72,10 @@ async function startRoom(users, mode, unranked) {
   for (let i = 0; i < users.length; i++) {
     const prof = await store.profile(users[i].key);
     looks.push((prof && prof.equipped && prof.equipped.look) || 'none');
+    if (room.m.p[i]) {
+      room.m.p[i].isOwner = prof.isOwner;
+      room.m.p[i].isAdmin = prof.isAdmin;
+    }
   }
 
   const teams = mode === '2v2' ? [0, 0, 1, 1] : [0, 1];
@@ -115,7 +119,9 @@ async function joinFFA(user) {
     i: slot, x: rx, y: ry, fa: Math.random() * 6.283, ch: 3, rc: 0, st: 0, sw: -1, hs: [],
     pa: -1, bc: 0, sc: 0, bw: 0, bdx: 0, bdy: 0, dead: false, ix: 0, iy: 0, spd: 200,
     team: slot, extract: 0, points: 0, kills: 0, parries: 0, blinks: 0,
-    god: false, noCd: false, isMinion: false, ownerIdx: -1, at: 0, ax: 0, ay: 0
+    god: false, noCd: false, isMinion: false, ownerIdx: -1, at: 0, ax: 0, ay: 0,
+    r: 13, reach: 56, tier: 'player', scale: 1.0, maxLives: 1, maxHearts: 1, lives: 1, hearts: 1,
+    unparryable: false, bossTelegraph: 0, isOwner: prof.isOwner, isAdmin: prof.isAdmin
   };
   m.p[slot] = newP;
 
@@ -251,10 +257,10 @@ function ipOf(s) {
 
 const authed = (s, token) => !!s.data.key && store.sessionValid(s.data.sh, s.data.key) && (token === undefined || store.tokenMatches(token, s.data.sh));
 
-async function isOwnerSocket(s) {
-  if (!s.data.key) return false;
+async function getPriv(s) {
+  if (!s.data.key) return { o: false, a: false };
   const p = await store.profile(s.data.key);
-  return !!(p && p.isOwner);
+  return p ? { o: p.isOwner, a: p.isOwner || p.isAdmin } : { o: false, a: false };
 }
 
 function enter(s, r) {
@@ -454,15 +460,17 @@ io.on('connection', (s) => {
   s.on('partyLeave', () => { leaveParty(s); });
 
   // ---------- Admin Operations ----------
-  s.on('admin_get_users', async (cb) => handle(cb, async () => {
-    if (!(await isOwnerSocket(s))) return cb({ err: 'Unauthorized' });
-    cb({ ok: true, users: await store.adminGetUsers() });
+  s.on('admin_get_users', async (d, cb) => handle(cb, async () => {
+    const priv = await getPriv(s);
+    if (!priv.a) return cb({ err: 'Unauthorized' });
+    cb({ ok: true, users: await store.adminGetUsers(d && d.search) });
   }));
 
   s.on('admin_set_ban', async (d, cb) => handle(cb, async () => {
-    if (!(await isOwnerSocket(s))) return cb({ err: 'Unauthorized' });
+    const priv = await getPriv(s);
+    if (!priv.a) return cb({ err: 'Unauthorized' });
     d = d || {};
-    const res = await store.adminSetBan(d.key, d.banned);
+    const res = await store.adminSetBan(d.key, d.banned, d.reason);
     if (res.err) return cb({ err: res.err });
     if (d.banned) {
       for (const other of io.sockets.sockets.values()) {
@@ -475,28 +483,46 @@ io.on('connection', (s) => {
     cb({ ok: true, banned: res.banned });
   }));
 
+  s.on('admin_set_admin', async (d, cb) => handle(cb, async () => {
+    const priv = await getPriv(s);
+    if (!priv.o) return cb({ err: 'Unauthorized (Owner Only)' });
+    d = d || {};
+    const res = await store.adminSetAdmin(d.key, d.isAdmin);
+    if (res.err) return cb({ err: res.err });
+    cb({ ok: true, isAdmin: res.isAdmin });
+  }));
+
+  s.on('admin_get_bans', async (cb) => handle(cb, async () => {
+    const priv = await getPriv(s);
+    if (!priv.a) return cb({ err: 'Unauthorized' });
+    cb({ ok: true, bans: await store.adminGetBans() });
+  }));
+
   s.on('admin_set_mmr', async (d, cb) => handle(cb, async () => {
-    if (!(await isOwnerSocket(s))) return cb({ err: 'Unauthorized' });
+    const priv = await getPriv(s);
+    if (!priv.o) return cb({ err: 'Unauthorized' });
     d = d || {};
     const res = await store.adminSetMmr(d.key, d.mmr);
     if (res.err) return cb({ err: res.err });
     cb({ ok: true, mmr: res.mmr, rank: res.rank });
   }));
 
-  s.on('admin_match_kill_enemies', () => {
+  s.on('admin_match_kill_enemies', async () => {
+    const priv = await getPriv(s);
     const room = s.data.room;
-    if (!room || !isOwnerSocket(s)) return;
+    if (!room || !priv.a) return;
     const myIdx = s.data.idx;
     room.m.p.forEach((p, idx) => {
-      if (idx !== myIdx && p && !p.dead && !p.isMinion) {
+      if (idx !== myIdx && p && !p.dead && !p.isMinion && !p.isOwner) {
         p.dead = true;
       }
     });
   });
 
-  s.on('admin_match_toggle_god', (cb) => {
+  s.on('admin_match_toggle_god', async (cb) => {
+    const priv = await getPriv(s);
     const room = s.data.room;
-    if (!room || !isOwnerSocket(s)) return;
+    if (!room || !priv.o) return;
     const p = room.m.p[s.data.idx];
     if (p) {
       p.god = !p.god;
@@ -504,9 +530,10 @@ io.on('connection', (s) => {
     }
   });
 
-  s.on('admin_match_toggle_nocd', (cb) => {
+  s.on('admin_match_toggle_nocd', async (cb) => {
+    const priv = await getPriv(s);
     const room = s.data.room;
-    if (!room || !isOwnerSocket(s)) return;
+    if (!room || !priv.o) return;
     const p = room.m.p[s.data.idx];
     if (p) {
       p.noCd = !p.noCd;
@@ -514,9 +541,10 @@ io.on('connection', (s) => {
     }
   });
 
-  s.on('admin_spawn_bodyguard', (cb) => {
+  s.on('admin_spawn_bodyguard', async (cb) => {
+    const priv = await getPriv(s);
     const room = s.data.room;
-    if (!room || !isOwnerSocket(s)) return;
+    if (!room || !priv.a) return;
     const myIdx = s.data.idx;
     const ev = [];
     const minion = G.spawnBodyguard(room.m, myIdx, ev);
@@ -526,6 +554,25 @@ io.on('connection', (s) => {
       if (typeof cb === 'function') cb({ ok: true, count: room.m.p.filter(x => x && x.isMinion && x.ownerIdx === myIdx && !x.dead).length });
     }
   });
+
+  s.on('admin_become_tetanus', async (cb) => handle(cb, async () => {
+    const priv = await getPriv(s);
+    if (!priv.o) return cb({ err: 'Unauthorized' });
+    const room = s.data.room;
+    if (!room || !room.m) return;
+    const p = room.m.p[s.data.idx];
+    if (p) {
+      p.tier = 'tetanus';
+      p.maxLives = 3; p.lives = 3;
+      p.maxHearts = 5; p.hearts = 5;
+      p.reach = 92;
+      p.scale = 2.2;
+      p.r = 13 * 2.2;
+      p.spd = 175;
+      io.to(room.id).emit('s', { m: room.m, ev: [] });
+      cb({ ok: true });
+    }
+  }));
 
   // ---------- Gameplay Inputs ----------
   s.on('in', (d) => {

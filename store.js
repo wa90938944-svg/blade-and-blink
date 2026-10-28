@@ -37,9 +37,7 @@ function normalizeName(raw) {
   const name = String(raw == null ? '' : raw).normalize('NFKC').replace(/\s+/g, ' ').trim();
   if (!/^[\w \-]{2,16}$/.test(name)) return { err: 'Use 2-16 letters, numbers, spaces, - or _' };
   const key = name.toLowerCase();
-  if (key === OWNER_KEY && name !== OWNER_NAME) {
-    return { err: 'That name is reserved' };
-  }
+  if (key === OWNER_KEY && name !== OWNER_NAME) return { err: 'That name is reserved' };
   if (key !== OWNER_KEY && RESERVED.has(key)) return { err: 'That name is reserved' };
   return { name, key };
 }
@@ -72,9 +70,7 @@ function createStore(uri) {
     console.error('MongoDB connection error:', err);
   });
 
-  async function waitForDb() {
-    while (!users) { await new Promise(r => setTimeout(r, 50)); }
-  }
+  async function waitForDb() { while (!users) { await new Promise(r => setTimeout(r, 50)); } }
 
   function createSession(key) {
     const token = crypto.randomBytes(32).toString('hex');
@@ -84,30 +80,20 @@ function createStore(uri) {
     return { token, sh };
   }
 
-  function sessionValid(sh, key) {
-    const s = activeSessions.get(sh);
-    return s && s.key === key;
-  }
-
+  function sessionValid(sh, key) { const s = activeSessions.get(sh); return s && s.key === key; }
   function tokenMatches(token, sh) {
     const s = activeSessions.get(sh);
     if (!s) return false;
     const h = crypto.createHash('sha256').update('bb1|' + token).digest('hex');
     return crypto.timingSafeEqual(Buffer.from(h, 'hex'), Buffer.from(s.tokenHash, 'hex'));
   }
-
-  function logout(sh) {
-    activeSessions.delete(sh);
-  }
+  function logout(sh) { activeSessions.delete(sh); }
 
   async function register(rawName, password) {
     const n = normalizeName(rawName);
     if (n.err) return n;
-    if (typeof password !== 'string' || password.length < 8) {
-      return { err: 'Password must be at least 8 characters' };
-    }
+    if (typeof password !== 'string' || password.length < 8) return { err: 'Password must be at least 8 characters' };
     await waitForDb();
-
     const existing = await users.findOne({ key: n.key });
     if (existing) return { err: 'That name is already taken' };
 
@@ -115,45 +101,28 @@ function createStore(uri) {
     const passwordHash = hashPassword(password);
     const earned = isOwner ? ALL_LOOKS.slice() : unlocksFor(START_MMR, n.name);
     const doc = {
-      key: n.key,
-      name: n.name,
-      passwordHash,
-      mmr: isOwner ? 9999 : START_MMR,
-      peak: isOwner ? 9999 : START_MMR,
-      wins: 0,
-      losses: 0,
-      games: 0,
-      streak: 0,
-      unlocked: earned,
-      equipped: { look: isOwner ? 'diamond' : 'none' },
-      isOwner: isOwner,
-      banned: false,
-      created: Date.now(),
-      seen: Date.now()
+      key: n.key, name: n.name, passwordHash,
+      mmr: isOwner ? 9999 : START_MMR, peak: isOwner ? 9999 : START_MMR,
+      wins: 0, losses: 0, games: 0, streak: 0,
+      unlocked: earned, equipped: { look: isOwner ? 'diamond' : 'none' },
+      isOwner: isOwner, isAdmin: false, banned: false, banReason: '',
+      created: Date.now(), seen: Date.now()
     };
-
     try {
       await users.insertOne(doc);
       const sess = createSession(n.key);
       return { ok: true, key: n.key, token: sess.token, sh: sess.sh };
-    } catch (e) {
-      return { err: 'That name is already taken' };
-    }
+    } catch (e) { return { err: 'That name is already taken' }; }
   }
 
   async function login(rawName, password) {
     const n = normalizeName(rawName);
     if (n.err) return n;
     await waitForDb();
-
     const user = await users.findOne({ key: n.key });
     if (!user) return { err: 'Account not found. Please register first.' };
-    if (user.banned) return { err: 'This account has been banned by an administrator.' };
-
-    if (!verifyPassword(password, user.passwordHash)) {
-      return { err: 'Incorrect password' };
-    }
-
+    if (user.banned) return { err: 'This account has been banned: ' + (user.banReason || 'No reason provided') };
+    if (!verifyPassword(password, user.passwordHash)) return { err: 'Incorrect password' };
     await users.updateOne({ key: n.key }, { $set: { seen: Date.now() } });
     const sess = createSession(n.key);
     return { ok: true, key: n.key, token: sess.token, sh: sess.sh };
@@ -163,40 +132,26 @@ function createStore(uri) {
     if (typeof token !== 'string' || token.length < 16) return { err: 'Invalid token' };
     const tokenHash = crypto.createHash('sha256').update('bb1|' + token).digest('hex');
     for (const [sh, s] of activeSessions.entries()) {
-      if (crypto.timingSafeEqual(Buffer.from(s.tokenHash, 'hex'), Buffer.from(tokenHash, 'hex'))) {
-        return { key: s.key, sh };
-      }
+      if (crypto.timingSafeEqual(Buffer.from(s.tokenHash, 'hex'), Buffer.from(tokenHash, 'hex'))) return { key: s.key, sh };
     }
     return { err: 'Session expired, please log in again' };
   }
 
-  async function claim(token, password) {
-    return register(token, password);
-  }
+  async function claim(token, password) { return register(token, password); }
 
   async function profile(key) {
     await waitForDb();
     const user = await users.findOne({ key });
-    if (!user) return null;
-    if (user.banned) return null;
+    if (!user || user.banned) return null;
     const isOwner = isOwnerAccount(user.name);
     const earned = unlocksFor(user.peak || user.mmr, user.name);
     const unlocked = isOwner ? ALL_LOOKS.slice() : Array.from(new Set((Array.isArray(user.unlocked) ? user.unlocked : []).concat(earned)));
     const look = (user.equipped && user.equipped.look) || user.activeLook || 'none';
     return {
-      name: user.name,
-      mmr: user.mmr,
-      rank: rankOf(user.mmr, user.name),
-      wins: user.wins,
-      losses: user.losses,
-      streak: user.streak,
-      peak: user.peak,
-      games: user.games,
-      unlocked: unlocked,
-      equipped: { look: unlocked.includes(look) ? look : topLook(unlocked) },
-      isOwner: isOwner,
-      banned: !!user.banned,
-      savedAt: user.seen || Date.now()
+      name: user.name, mmr: user.mmr, rank: rankOf(user.mmr, user.name),
+      wins: user.wins, losses: user.losses, streak: user.streak, peak: user.peak, games: user.games,
+      unlocked: unlocked, equipped: { look: unlocked.includes(look) ? look : topLook(unlocked) },
+      isOwner: isOwner, isAdmin: !!user.isAdmin, banned: !!user.banned, savedAt: user.seen || Date.now()
     };
   }
 
@@ -211,9 +166,7 @@ function createStore(uri) {
 
   async function saveData(key, equipped) {
     await waitForDb();
-    if (equipped && typeof equipped === 'object' && equipped.look) {
-      return equip(key, equipped.look);
-    }
+    if (equipped && typeof equipped === 'object' && equipped.look) return equip(key, equipped.look);
     return { ok: true, savedAt: Date.now() };
   }
 
@@ -222,87 +175,71 @@ function createStore(uri) {
     const w = await users.findOne({ key: winKey });
     const l = await users.findOne({ key: loseKey });
     if (!w || !l) return { win: { delta: WIN_MMR, oldRank: rankOf(START_MMR, '') }, lose: { delta: LOSS_MMR, oldRank: rankOf(START_MMR, '') } };
-
     const w0 = w.mmr, l0 = l.mmr, wr = rankOf(w0, w.name), lr = rankOf(l0, l.name);
     const newWMMR = w0 + WIN_MMR;
     const newPeak = Math.max(w.peak || START_MMR, newWMMR);
     const earned = unlocksFor(newPeak, w.name);
     const newUnlocked = isOwnerAccount(w.name) ? ALL_LOOKS.slice() : Array.from(new Set((Array.isArray(w.unlocked) ? w.unlocked : []).concat(earned)));
-
-    await users.updateOne({ key: winKey }, {
-      $inc: { mmr: WIN_MMR, wins: 1, games: 1, streak: 1 },
-      $set: { peak: newPeak, unlocked: newUnlocked, seen: Date.now() }
-    });
-
-    await users.updateOne({ key: loseKey }, {
-      $inc: { mmr: -LOSS_MMR, losses: 1, games: 1 },
-      $set: { streak: 0, seen: Date.now() }
-    });
-
+    await users.updateOne({ key: winKey }, { $inc: { mmr: WIN_MMR, wins: 1, games: 1, streak: 1 }, $set: { peak: newPeak, unlocked: newUnlocked, seen: Date.now() } });
+    await users.updateOne({ key: loseKey }, { $inc: { mmr: -LOSS_MMR, losses: 1, games: 1 }, $set: { streak: 0, seen: Date.now() } });
     return { win: { delta: WIN_MMR, oldRank: wr }, lose: { delta: LOSS_MMR, oldRank: lr } };
   }
 
-  // Balanced: 25 Essence = 1 MMR (Keeps Diamond prestige high)
   async function bankExtracted(key, points) {
     if (!points || points <= 0) return null;
     await waitForDb();
     const user = await users.findOne({ key });
     if (!user) return null;
-    const oldMmr = user.mmr;
-    const oldRank = rankOf(oldMmr, user.name);
+    const oldMmr = user.mmr, oldRank = rankOf(oldMmr, user.name);
     const delta = Math.floor(points / 25);
     if (delta <= 0) return { delta: 0, oldRank: oldRank, newMmr: oldMmr };
-
-    const newMmr = oldMmr + delta;
-    const newPeak = Math.max(user.peak || START_MMR, newMmr);
+    const newMmr = oldMmr + delta, newPeak = Math.max(user.peak || START_MMR, newMmr);
     const earned = unlocksFor(newPeak, user.name);
     const newUnlocked = isOwnerAccount(user.name) ? ALL_LOOKS.slice() : Array.from(new Set((Array.isArray(user.unlocked) ? user.unlocked : []).concat(earned)));
-
-    await users.updateOne({ key }, {
-      $inc: { mmr: delta },
-      $set: { peak: newPeak, unlocked: newUnlocked, seen: Date.now() }
-    });
+    await users.updateOne({ key }, { $inc: { mmr: delta }, $set: { peak: newPeak, unlocked: newUnlocked, seen: Date.now() } });
     return { delta: delta, oldRank: oldRank, newMmr: newMmr };
   }
 
   async function top(n) {
     await waitForDb();
-    const list = await users.find({ games: { $gt: 0 }, banned: { $ne: true } })
-      .sort({ mmr: -1, wins: -1 })
-      .limit(n)
-      .toArray();
-    return list.map(p => ({
-      name: p.name,
-      mmr: p.mmr,
-      rank: rankOf(p.mmr, p.name),
-      wins: p.wins,
-      losses: p.losses,
-      isOwner: isOwnerAccount(p.name)
-    }));
+    const list = await users.find({ games: { $gt: 0 }, banned: { $ne: true } }).sort({ mmr: -1, wins: -1 }).limit(n).toArray();
+    return list.map(p => ({ name: p.name, mmr: p.mmr, rank: rankOf(p.mmr, p.name), wins: p.wins, losses: p.losses, isOwner: isOwnerAccount(p.name) }));
   }
 
-  async function adminGetUsers() {
+  async function adminGetUsers(search) {
     await waitForDb();
-    const list = await users.find({}).sort({ created: -1 }).toArray();
+    let query = {};
+    if (search) query.name = { $regex: search, $options: 'i' };
+    const list = await users.find(query).sort({ created: -1 }).limit(100).toArray();
     return list.map(u => ({
-      key: u.key,
-      name: u.name,
-      mmr: u.mmr,
-      rank: rankOf(u.mmr, u.name),
-      wins: u.wins,
-      losses: u.losses,
-      banned: !!u.banned,
+      key: u.key, name: u.name, mmr: u.mmr, rank: rankOf(u.mmr, u.name),
+      wins: u.wins, losses: u.losses, banned: !!u.banned, isAdmin: !!u.isAdmin,
       isOwner: isOwnerAccount(u.name)
     }));
   }
 
-  async function adminSetBan(targetKey, banned) {
+  async function adminSetBan(targetKey, banned, reason) {
     await waitForDb();
     const target = await users.findOne({ key: targetKey });
     if (!target) return { err: 'Player not found' };
-    if (isOwnerAccount(target.name)) return { err: 'Cannot ban owner' };
-    await users.updateOne({ key: targetKey }, { $set: { banned: !!banned } });
+    if (isOwnerAccount(target.name)) return { err: 'Cannot ban the Owner' };
+    await users.updateOne({ key: targetKey }, { $set: { banned: !!banned, banReason: banned ? (reason || '') : '' } });
     return { ok: true, banned: !!banned };
+  }
+
+  async function adminSetAdmin(targetKey, isAdmin) {
+    await waitForDb();
+    const target = await users.findOne({ key: targetKey });
+    if (!target) return { err: 'Player not found' };
+    if (isOwnerAccount(target.name)) return { err: 'Cannot modify Owner' };
+    await users.updateOne({ key: targetKey }, { $set: { isAdmin: !!isAdmin } });
+    return { ok: true, isAdmin: !!isAdmin };
+  }
+
+  async function adminGetBans() {
+    await waitForDb();
+    const list = await users.find({ banned: true }).sort({ seen: -1 }).toArray();
+    return list.map(u => ({ key: u.key, name: u.name, reason: u.banReason || 'No reason provided' }));
   }
 
   async function adminSetMmr(targetKey, newMmr) {
@@ -317,14 +254,12 @@ function createStore(uri) {
     return { ok: true, mmr: newMmr, rank: rankOf(newMmr, target.name) };
   }
 
-  async function flush() {
-    return true;
-  }
+  async function flush() { return true; }
 
   return {
     register, login, resume, claim, sessionValid, tokenMatches, logout,
     saveData, equip, profile, record, bankExtracted, top, flush,
-    adminGetUsers, adminSetBan, adminSetMmr
+    adminGetUsers, adminSetBan, adminSetMmr, adminSetAdmin, adminGetBans
   };
 }
 
