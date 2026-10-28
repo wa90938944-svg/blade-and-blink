@@ -582,6 +582,7 @@
       show('adminhub');
     }
   };
+  
   $('adminHubClose').onclick = function () { showLobby(); };
   $('cheatsClose').onclick = function () { show(null); };
 
@@ -647,11 +648,10 @@
     $('mgrOwnerTools').hidden = !prof.isOwner;
     $('mgrMmrInp').value = u.mmr;
     $('mgrPromote').textContent = u.isAdmin ? 'Demote Admin' : 'Promote to Admin';
-    $('mgrPromote').disabled = u.isOwner; // Can't touch owner role
+    $('mgrPromote').disabled = u.isOwner; 
 
     $('mgrBanReason').value = u.banReason || '';
     
-    // Admins cannot ban Admins or Owners. Owners cannot ban themselves.
     var canBan = true;
     if (u.isOwner) canBan = false;
     if (!prof.isOwner && u.isAdmin) canBan = false;
@@ -671,7 +671,7 @@
         toast('MMR updated to ' + r.mmr);
         managedUser.mmr = r.mmr;
         managedUser.rank = r.rank;
-        openManageUser(managedUser); // refresh UI
+        openManageUser(managedUser);
       } else toast((r && r.err) || 'Error', true);
     });
   };
@@ -715,20 +715,20 @@
 
   function loadAdminReports() {
     var list = $('adminReportsList');
-    list.innerHTML = '<div style="padding:10px;text-align:center">Loading reports...</div>';
+    list.innerHTML = '<li style="padding:10px;text-align:center">Loading reports...</li>';
     sock.emit('admin_get_reports', function (r) {
-      if (!r || !r.ok) { list.innerHTML = '<div style="padding:10px;color:var(--redhi)">Failed to load data</div>'; return; }
+      if (!r || !r.ok) { list.innerHTML = '<li style="padding:10px;color:var(--redhi)">Failed to load data</li>'; return; }
       list.innerHTML = '';
-      if (r.reports.length === 0) list.innerHTML = '<div style="padding:10px;text-align:center;color:var(--dim)">No ban history found.</div>';
+      if (r.reports.length === 0) list.innerHTML = '<li style="padding:10px;text-align:center;color:var(--dim)">No ban history found.</li>';
       
       r.reports.forEach(function (rep) {
-        var row = document.createElement('div');
-        row.className = 'adm-report-box';
+        var li = document.createElement('li');
+        li.className = 'adm-report-box';
         var date = new Date(rep.timestamp).toLocaleString();
         var roleTag = rep.adminRole === 'OWNER' ? '<span class="tag tag-owner">OWNER</span>' : '<span class="tag tag-admin">ADMIN</span>';
         var status = rep.activeBan ? '' : '<span class="tag" style="background:#555;color:#fff">LIFTED</span>';
         
-        row.innerHTML = `
+        li.innerHTML = `
           <div style="font-size:16px;margin-bottom:4px"><b style="color:var(--redhi)">${rep.targetName}</b> ${status}</div>
           <div style="font-size:13px;color:var(--dim);margin-bottom:6px">Banned by: <b>${rep.adminName}</b> ${roleTag} &middot; ${date}</div>
           <div style="font-size:14px;background:var(--panel-hi);padding:6px;border-left:3px solid var(--redhi)">${rep.reason}</div>
@@ -746,9 +746,9 @@
               if (res.err) toast(res.err, true); else { toast('Unbanned'); loadAdminReports(); }
             });
           };
-          row.appendChild(unbanBtn);
+          li.appendChild(unbanBtn);
         }
-        list.appendChild(row);
+        list.appendChild(li);
       });
     });
   }
@@ -1251,7 +1251,7 @@
         ring(e.x, e.y, c, R + (small ? 44 : 80), 0.55, 6);
         splat(e.x, e.y, c, small ? 12 : 22); stain(e.x, e.y, c, small ? 10 : 26, small ? 20 : 42);
         shake = small ? 4 : 11; punch = small ? 0.012 : 0.035; flash = small ? 0 : 0.35;
-        hitStop(small ? 0.03 : 0.12); snd('kill', e.x);
+        snd('kill', e.x);
         if (e.i === me) vib(90);
       } else if (e.t === 'spawn') { burst(e.x, e.y, COL[1], 14); ring(e.x, e.y, COL[1], R + 30, 0.4, 3); snd('spawn', e.x); }
       else if (e.t === 'boss_morph') {
@@ -1776,12 +1776,9 @@
       return;
     }
     if (M && (mode === 'bot' || mode === 'local' || mode === 'endless') && M.phase !== 'over') {
-      if (freeze > 0) freeze -= dt;
-      else {
-        var inp = mode === 'endless' ? [localInp(0)] : [localInp(0), mode === 'bot' ? {} : localInp(1)];
-        onEv(S.tick(M, inp, dt));
-        if (M.phase === 'over') finishLocal();
-      }
+      var inp = mode === 'endless' ? [localInp(0)] : [localInp(0), mode === 'bot' ? {} : localInp(1)];
+      onEv(S.tick(M, inp, dt));
+      if (M.phase === 'over') finishLocal();
     }
     watch(); smooth();
     if (M && (mode === 'endless' || mode === 'ffa' || mode === 'bot')) hud();
