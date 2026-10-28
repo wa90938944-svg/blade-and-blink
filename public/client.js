@@ -575,6 +575,29 @@
         setTimeout(function () { banner.classList.remove('show'); }, 6000);
       }
     });
+
+    sock.on('chat_msg', function(d) {
+      var log = $('chatLog');
+      $('chatWrap').hidden = false;
+      var el = document.createElement('div');
+      el.className = 'chat-msg';
+      var nameSpan = document.createElement('b');
+      nameSpan.textContent = d.name + ':';
+      el.appendChild(nameSpan);
+      var textSpan = document.createElement('span');
+      textSpan.textContent = d.msg;
+      el.appendChild(textSpan);
+      log.appendChild(el);
+      if (log.childNodes.length > 5) log.removeChild(log.firstChild);
+      setTimeout(function() {
+        if (el.parentNode === log) {
+          log.removeChild(el);
+          if (log.childNodes.length === 0 && $('chatInputWrap').style.display !== 'block') {
+            $('chatWrap').hidden = true;
+          }
+        }
+      }, 8000);
+    });
   }
 
   // ---------- Admin Panel Interactions ----------
@@ -1132,6 +1155,12 @@
         ring(e.x, e.y, GOLD, R + 45, 0.4, 4);
         burst(e.x, e.y, GOLD, 16);
       }
+      else if (e.t === 'shield_break') {
+        ring(e.x, e.y, '#ffffff', R + 40, 0.5, 4);
+        shatter(e.x, e.y, '#ffffff', 8);
+        snd('raise', e.x);
+        vib(20);
+      }
       else if (e.t === 'blink') {
         c = e.unparryable ? '#680c07' : COL[teams[e.i] || 0];
         var lk = looks[e.i] || 'none';
@@ -1215,10 +1244,36 @@
   document.addEventListener('click', function (e) {
     if (e.target && e.target.closest && e.target.closest('button')) snd('click');
   });
+
+  $('chatInput').addEventListener('keydown', function (e) {
+    e.stopPropagation();
+    if (e.key === 'Enter') {
+      var txt = this.value.trim();
+      if (txt) sock.emit('chat', txt);
+      this.value = '';
+      $('chatInputWrap').style.display = 'none';
+      cv.focus();
+    }
+    if (e.key === 'Escape') {
+      this.value = '';
+      $('chatInputWrap').style.display = 'none';
+      cv.focus();
+    }
+  });
+
   addEventListener('keydown', function (e) {
     if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT')) return;
     var k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
     if (k === 'm' && typeof Sfx !== 'undefined') { Sfx.toggle(); syncMute(); return; }
+    
+    if (k === 'c' && (mode === 'online' || mode === 'ffa' || mode === '2v2')) {
+      e.preventDefault();
+      $('chatWrap').hidden = false;
+      $('chatInputWrap').style.display = 'block';
+      $('chatInput').focus();
+      return;
+    }
+
     if (k === 'p' && prof && (prof.isOwner || prof.isAdmin) && mode) {
       spawnGuardCmd();
       return;
@@ -1477,6 +1532,20 @@
       var pReach = p.reach || S.REACH;
       var pR = p.r || R;
 
+      if (p.isLeader && mode === 'ffa') {
+        var aPulse = 0.5 + 0.5 * Math.sin(now / 300);
+        ctx.strokeStyle = `rgba(217, 165, 38, ${0.4 + aPulse * 0.3})`; 
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(px, py, pR + 14 + aPulse * 4, 0, 6.283);
+        ctx.stroke();
+        
+        ctx.fillStyle = GOLD;
+        ctx.font = '14px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('👑', px, py - pR - 32);
+      }
+
       if (p.bossTelegraph > 0) {
         ctx.save();
         if (p.bossAction === 'crush') {
@@ -1551,6 +1620,11 @@
       if (p.god) {
         ctx.strokeStyle = GOLD; ctx.lineWidth = 2;
         ctx.beginPath(); ctx.arc(px, py, pR + 4 + Math.sin(now / 150) * 2, 0, 6.283); ctx.stroke();
+      }
+      
+      if (p.shield) {
+        ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.arc(px, py, pR + 10 + Math.sin(now / 200) * 3, 0, 6.283); ctx.stroke();
       }
 
       if (p.tier === 'tetanus') {

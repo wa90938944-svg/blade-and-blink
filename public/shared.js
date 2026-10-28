@@ -4,7 +4,7 @@
   var W = 640, H = 400, R = 13, PAR = 0.35, A0 = 0.08, A1 = 0.22;
   var FFA_W = 1800, FFA_H = 1200;
   var REACH = 56, BLINK_D = 120, BLINK_REC = 0.3, CHARGE_T = 3.5, SPAWN_T = 5, SWING_CD = 0.2, BLINK_WIND = 0.1;
-  var SHRINE_R = 36, EXTRACT_TIME = 1.5; // Reduced from 3.0 for smaller map pacing
+  var SHRINE_R = 36, EXTRACT_TIME = 1.5;
 
   var TIERS = {
     player:  { lives: 1, maxHearts: 1, spd: 200, reach: REACH, scale: 1.0 },
@@ -23,6 +23,7 @@
       pa: -1, bc: 0, sc: 0, bw: 0, bdx: 0, bdy: 0, dead: false, ix: 0, iy: 0,
       spd: cfg.spd, team: team !== undefined ? team : i, extract: 0, points: 0,
       kills: 0, parries: 0, blinks: 0, god: false, noCd: false, fast: false, isMinion: false,
+      shield: false, combatTimer: 0, isLeader: false,
       ownerIdx: -1, at: 0, ax: 0, ay: 0,
       tier: tier, lives: cfg.lives, maxLives: cfg.lives, hearts: cfg.maxHearts, maxHearts: cfg.maxHearts,
       reach: cfg.reach, scale: scale, r: R * scale, unparryable: false,
@@ -90,7 +91,7 @@
     return {
       ffa: true, mode: 'ffa', p: [], shrines: [],
       phase: 'fight', round: 1, score: [0, 0], win: 9999,
-      boundW: FFA_W, boundH: FFA_H, shrineTimer: 10
+      boundW: FFA_W, boundH: FFA_H, shrineTimer: 10, leaderIdx: -1
     };
   }
 
@@ -172,9 +173,25 @@
       ev.push({ t: 'god_block', x: d.x, y: d.y });
       return;
     }
+
+    d.combatTimer = 10;
+    a.combatTimer = 10;
+
+    if (d.shield && !a.unparryable) {
+      d.shield = false;
+      a.st = 1.25;
+      a.sw = -1; a.pa = -1; a.bw = 0;
+      
+      var nx = a.x - d.x, ny = a.y - d.y;
+      var nd = Math.hypot(nx, ny) || 1;
+      a.x = cl(a.x + (nx/nd)*90, a.r, FFA_W); 
+      a.y = cl(a.y + (ny/nd)*90, a.r, FFA_H);
+      ev.push({ t: 'shield_break', i: d.i, x: d.x, y: d.y });
+      return;
+    }
+
     if (parrying(d) && !a.unparryable) {
       d.whiffedParry = false;
-      // Zero parry recovery: immediately clear parry & cooldowns so defender can instant-counter
       d.pa = -1;
       d.sc = 0;
       d.bc = 0;
@@ -200,6 +217,7 @@
       a.points = (a.points || 0) + 35;
       if (d.dead) {
         a.kills = (a.kills || 0) + 1;
+        a.combatTimer = 0; 
         ev.push({ t: 'slain', killer: a.i, victim: d.i });
       }
     }
@@ -488,7 +506,24 @@
     var n = m.p.length, i, j, p, o, q, u, l, fs;
     var bW = m.boundW || W, bH = m.boundH || H;
 
-    if (m.ffa) updateShrines(m, dt, ev);
+    if (m.ffa) {
+      updateShrines(m, dt, ev);
+      
+      let maxKills = 0, leaderIdx = -1;
+      for (i = 0; i < n; i++) {
+        p = m.p[i]; if (!p || p.dead || p.isMinion) continue;
+        if (p.kills > maxKills) { maxKills = p.kills; leaderIdx = i; }
+      }
+      m.leaderIdx = leaderIdx;
+
+      for (i = 0; i < n; i++) {
+        p = m.p[i]; if (!p || p.dead) continue;
+        p.isLeader = (i === m.leaderIdx && p.kills > 0);
+        if (p.combatTimer > 0) p.combatTimer -= dt;
+        if (p.isLeader && p.combatTimer <= 0 && !p.shield) p.shield = true;
+        else if (!p.isLeader) p.shield = false;
+      }
+    }
 
     for (i = 0; i < n; i++) {
       p = m.p[i];
@@ -547,7 +582,6 @@
       }
       if (l > 0) {
         var parrySlow = (parrying(p) && p.tier !== 'apex') ? 0.5 : 1;
-        // Apply 2.5x speed multiplier if the fast cheat is toggled on
         var sp = p.spd * (p.sw >= 0 ? 0.6 : 1) * parrySlow * (p.bw > 0 ? 0.3 : 1) * (p.fast ? 2.5 : 1);
         p.x = cl(p.x + p.ix * sp * dt, p.r, bW - p.r);
         p.y = cl(p.y + p.iy * sp * dt, p.r, bH - p.r);
@@ -562,7 +596,7 @@
           p.extract += dt;
           if (p.extract >= EXTRACT_TIME) {
             p.dead = true;
-            ev.push({ t: 'extract', i: p.i, points: p.points || 0 });
+            ev.push({ t: 'extract', i: p.i, points: p.points || 0, kills: p.kills || 0 });
           }
         } else {
           p.extract = 0;

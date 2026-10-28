@@ -185,19 +185,30 @@ function createStore(uri) {
     return { win: { delta: WIN_MMR, oldRank: wr }, lose: { delta: LOSS_MMR, oldRank: lr } };
   }
 
-  async function bankExtracted(key, points) {
+  async function bankExtracted(key, points, kills) {
     if (!points || points <= 0) return null;
     await waitForDb();
     const user = await users.findOne({ key });
     if (!user) return null;
     const oldMmr = user.mmr, oldRank = rankOf(oldMmr, user.name);
-    const delta = Math.floor(points / 25);
+    const delta = Math.floor(points / 25) + ((kills || 0) * 15);
     if (delta <= 0) return { delta: 0, oldRank: oldRank, newMmr: oldMmr };
     const newMmr = oldMmr + delta, newPeak = Math.max(user.peak || START_MMR, newMmr);
     const earned = unlocksFor(newPeak, user.name);
     const newUnlocked = isOwnerAccount(user.name) ? ALL_LOOKS.slice() : Array.from(new Set((Array.isArray(user.unlocked) ? user.unlocked : []).concat(earned)));
     await users.updateOne({ key }, { $inc: { mmr: delta }, $set: { peak: newPeak, unlocked: newUnlocked, seen: Date.now() } });
     return { delta: delta, oldRank: oldRank, newMmr: newMmr };
+  }
+
+  async function ffaDeathPenalty(key, kills) {
+    if (kills >= 5) return { delta: 0 };
+    await waitForDb();
+    const user = await users.findOne({ key });
+    if (!user || user.banned) return { delta: 0 };
+    const penalty = -150;
+    const newMmr = Math.max(0, user.mmr + penalty);
+    await users.updateOne({ key }, { $set: { mmr: newMmr, seen: Date.now() } });
+    return { delta: penalty, oldRank: rankOf(user.mmr, user.name), newMmr };
   }
 
   async function top(n) {
@@ -258,7 +269,7 @@ function createStore(uri) {
 
   return {
     register, login, resume, claim, sessionValid, tokenMatches, logout,
-    saveData, equip, profile, record, bankExtracted, top, flush,
+    saveData, equip, profile, record, bankExtracted, ffaDeathPenalty, top, flush,
     adminGetUsers, adminSetBan, adminSetMmr, adminSetAdmin, adminGetBans
   };
 }

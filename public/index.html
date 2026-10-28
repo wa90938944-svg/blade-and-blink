@@ -298,6 +298,52 @@ button:focus-visible{outline:3px solid var(--gold);outline-offset:3px}
   transform:translateY(0);
 }
 
+/* In-Game Chat UI */
+#chatWrap {
+  position: absolute;
+  bottom: 10px;
+  left: 10px;
+  width: 320px;
+  max-height: 240px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 6px;
+  pointer-events: none;
+  z-index: 40;
+}
+#chatLog {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow-y: hidden;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--bone);
+  text-shadow: 1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000;
+}
+.chat-msg {
+  background: rgba(0, 0, 0, 0.55);
+  padding: 4px 8px;
+  border-radius: 4px;
+  word-wrap: break-word;
+  line-height: 1.2;
+}
+.chat-msg b { color: var(--gold); margin-right: 4px; }
+#chatInputWrap {
+  display: none;
+  pointer-events: auto;
+}
+#chatInput {
+  width: 100%;
+  font-size: 15px;
+  padding: 8px;
+  background: rgba(0, 0, 0, 0.85);
+  border: 2px solid var(--bone);
+  color: var(--bone);
+  text-align: left;
+}
+
 #pad{width:min(94vw,520px);display:flex;justify-content:space-between;align-items:center;gap:10px;touch-action:none;-webkit-touch-callout:none}
 #stick{position:relative;flex:none;width:clamp(104px,32vw,150px);aspect-ratio:1;border:3px solid var(--bone);border-radius:50%;background:rgba(27,24,20,.88);box-shadow:4px 4px 0 var(--red);touch-action:none}
 #stick::before,#stick::after{content:"";position:absolute;background:var(--line)}
@@ -352,6 +398,15 @@ button:focus-visible{outline:3px solid var(--gold);outline-offset:3px}
   <div id="hud"><span id="s0">P1</span><span id="rnd">Blade &amp; Blink</span><span id="s1">P2</span></div>
   <div id="stage">
     <canvas id="c" width="640" height="400"></canvas>
+    
+    <!-- In-Game Chat UI -->
+    <div id="chatWrap" hidden>
+      <div id="chatLog"></div>
+      <div id="chatInputWrap">
+        <input id="chatInput" placeholder="Press Enter to send..." maxlength="80" autocomplete="off">
+      </div>
+    </div>
+
     <div id="ov">
       <div class="screen on" id="login">
         <h1>Blade <span>&amp;</span> Blink</h1>
@@ -518,7 +573,7 @@ button:focus-visible{outline:3px solid var(--gold);outline-offset:3px}
   </div>
 </div>
 <div id="tools"><button class="ghost" id="mute">Sound on</button><span id="ping"></span><button class="ghost" id="forfeit" hidden>Forfeit</button></div>
-<div id="legend">Local: P1 WASD + F swing, G parry, H blink. P2 arrows + comma swing, period parry, slash blink.</div>
+<div id="legend">Local: P1 WASD + F swing, G parry, H blink. P2 arrows + comma swing, period parry, slash blink. C to chat.</div>
 <script src="/socket.io/socket.io.js"></script>
 <script src="sfx.js"></script>
 <script src="shared.js"></script>

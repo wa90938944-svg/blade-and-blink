@@ -95,8 +95,18 @@ async function joinFFA(user) {
   const m = ffaWorld.m;
   const prof = await store.profile(user.key);
   const look = (prof && prof.equipped && prof.equipped.look) || 'none';
-  const rx = 100 + Math.random() * (G.FFA_W - 200);
-  const ry = 100 + Math.random() * (G.FFA_H - 200);
+  
+  let rx, ry, safe = false, attempts = 0;
+  const leader = m.leaderIdx >= 0 ? m.p[m.leaderIdx] : null;
+
+  while (!safe && attempts++ < 25) {
+    rx = 100 + Math.random() * (G.FFA_W - 200);
+    ry = 100 + Math.random() * (G.FFA_H - 200);
+    safe = true;
+    if (leader && !leader.dead && Math.hypot(rx - leader.x, ry - leader.y) < 700) {
+      safe = false; // Spawn distance buffer from King
+    }
+  }
 
   let slot = -1;
   for (let i = 0; i < ffaWorld.users.length; i++) {
@@ -119,7 +129,8 @@ async function joinFFA(user) {
     i: slot, x: rx, y: ry, fa: Math.random() * 6.283, ch: 3, rc: 0, st: 0, sw: -1, hs: [],
     pa: -1, bc: 0, sc: 0, bw: 0, bdx: 0, bdy: 0, dead: false, ix: 0, iy: 0, spd: 200,
     team: slot, extract: 0, points: 0, kills: 0, parries: 0, blinks: 0,
-    god: false, noCd: false, fast: false, isMinion: false, ownerIdx: -1, at: 0, ax: 0, ay: 0,
+    god: false, noCd: false, fast: false, isMinion: false, shield: false, combatTimer: 0, isLeader: false,
+    ownerIdx: -1, at: 0, ax: 0, ay: 0,
     r: 13, reach: 56, tier: 'player', scale: 1.0, maxLives: 1, maxHearts: 1, lives: 1, hearts: 1,
     unparryable: false, bossTelegraph: 0, isOwner: prof.isOwner, isAdmin: prof.isAdmin
   };
@@ -211,7 +222,9 @@ setInterval(() => {
       if (e.t === 'extract') {
         const u = room.users[e.i];
         if (u) {
-          const res = await store.bankExtracted(u.key, e.points);
+          const userState = room.m.p[e.i];
+          const kills = userState ? (userState.kills || 0) : 0;
+          const res = await store.bankExtracted(u.key, e.points, kills);
           const prof = await store.profile(u.key);
           leaveFFA(u, true, e.points);
           u.s.emit('end', {
@@ -222,11 +235,14 @@ setInterval(() => {
       } else if (e.t === 'kill' && room.ffa) {
         const victim = room.users[e.i];
         if (victim) {
+          const victimState = room.m.p[e.i];
+          const kills = victimState ? (victimState.kills || 0) : 0;
+          const res = await store.ffaDeathPenalty(victim.key, kills);
           const prof = await store.profile(victim.key);
           leaveFFA(victim, false, 0);
           victim.s.emit('end', {
             mode: 'ffa', you: e.i, extracted: false, points: 0,
-            delta: 0, oldRank: prof.rank, profile: prof
+            delta: res.delta, oldRank: res.oldRank || prof.rank, profile: prof
           });
         }
       }
@@ -279,6 +295,7 @@ function handle(cb, fn) {
 io.on('connection', (s) => {
   const okIn = limiter(120), okAct = limiter(30);
   const okAuth = limiter(10, 60000), okSave = limiter(5), okEquip = limiter(8);
+  const okChat = limiter(5, 5000); // 5 messages per 5 seconds
 
   s.on('register', (d, cb) => handle(cb, async () => {
     if (!okAuth()) return cb({ err: 'Slow down for a moment' });
@@ -626,6 +643,16 @@ io.on('connection', (s) => {
     const room = s.data.room;
     if (!room || !okAct() || !['sw', 'pa', 'bl'].includes(k)) return;
     if (room.inp[s.data.idx]) room.inp[s.data.idx][k] = true;
+  });
+
+  s.on('chat', async (d) => {
+    const room = s.data.room;
+    if (!room || !authed(s)) return;
+    if (!okChat()) return;
+    if (typeof d !== 'string' || !d.trim()) return;
+    const msg = d.trim().substring(0, 80);
+    const p = await store.profile(s.data.key);
+    io.to(room.id).emit('chat_msg', { name: p.name, msg: msg, i: s.data.idx });
   });
 
   s.on('forfeit', () => {
