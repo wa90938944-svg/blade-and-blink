@@ -37,7 +37,7 @@
   var selectedTier = 'novice';
   var apexConquered = false;
   var isBossEncounter = false;
-  var bossDialogueT = 0;
+  var bossDialogueT = 0, BOSS_INTRO_T = 3.6;
   var cam = { x: W / 2, y: H / 2 };
 
   function hexA(h, a) { return 'rgba(' + parseInt(h.slice(1, 3), 16) + ',' + parseInt(h.slice(3, 5), 16) + ',' + parseInt(h.slice(5, 7), 16) + ',' + a + ')'; }
@@ -938,7 +938,7 @@
       splat(bx, by, '#5c0a06', 14 + Math.random() * 18);
       stain(bx, by, '#4a0704', 12, 36);
     }
-    bossDialogueT = 2.6;
+    bossDialogueT = BOSS_INTRO_T;
     shake = 16;
     snd('gong');
   }
@@ -1531,7 +1531,7 @@
 
   function draw(now) {
     ctx.save();
-    ctx.fillStyle = isBossEncounter ? '#dfd1b8' : PAPER;
+    ctx.fillStyle = isBossEncounter ? '#8c8271' : PAPER;
     ctx.fillRect(0, 0, W, H);
     if (!M) {
       if (mode === 'online' || mode === 'ffa' || mode === '2v2') {
@@ -1563,7 +1563,7 @@
     ctx.stroke();
 
     if (mode !== 'ffa') ctx.drawImage(inkC, 0, 0);
-    petalW = boundW; petalH = boundH; drawPetals();
+    petalW = boundW; petalH = boundH; if (!isBossEncounter) drawPetals();
 
     if (isBossEncounter) drawChains(ctx, now);
 
@@ -1796,24 +1796,31 @@
       }
     }
 
+    if (isBossEncounter) {
+      var bossV = ctx.createRadialGradient(W / 2, H / 2, H * 0.25, W / 2, H / 2, W * 0.6);
+      bossV.addColorStop(0, 'rgba(8,3,2,0)'); bossV.addColorStop(1, 'rgba(8,3,2,0.55)');
+      ctx.fillStyle = bossV; ctx.fillRect(0, 0, W, H);
+    }
     ctx.drawImage(vigC, 0, 0);
     ctx.globalAlpha = 0.6; ctx.drawImage(grainC, 0, 0); ctx.globalAlpha = 1;
 
     if (bossDialogueT > 0) {
+      var bt = BOSS_INTRO_T - bossDialogueT;
+      var bl1 = Math.max(0, Math.min(1, bt / 0.7)), bl2 = Math.max(0, Math.min(1, (bt - 1.3) / 0.7));
       ctx.save();
-      ctx.fillStyle = 'rgba(18, 12, 10, 0.92)';
+      ctx.fillStyle = 'rgba(8, 4, 3, 0.94)';
       ctx.fillRect(0, H / 2 - 46, W, 92);
-      ctx.strokeStyle = '#c9331f';
-      ctx.lineWidth = 3;
+      ctx.strokeStyle = '#5c0a06';
+      ctx.lineWidth = 2;
       ctx.strokeRect(0, H / 2 - 46, W, 92);
-      ctx.font = '400 28px "Dela Gothic One", Impact, sans-serif';
-      ctx.fillStyle = '#efe6d2';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText('BLOOD CALLS FOR BLOOD...', W / 2, H / 2 - 6);
-      ctx.font = '700 15px "Barlow Condensed", sans-serif';
-      ctx.fillStyle = '#c9331f';
-      ctx.fillText('SECRET ENCOUNTER: TETANUS (UNPARRYABLE CRUSH DASH)', W / 2, H / 2 + 24);
+      ctx.font = '400 28px "Dela Gothic One", Impact, sans-serif';
+      ctx.globalAlpha = bl1; ctx.fillStyle = '#efe6d2';
+      ctx.fillText('NOBODY IS COMING FOR YOU.', W / 2, H / 2 - 8);
+      ctx.font = '700 17px "Barlow Condensed", sans-serif';
+      ctx.globalAlpha = bl2; ctx.fillStyle = '#9a1b12';
+      ctx.fillText('I WILL NOT STOP.', W / 2, H / 2 + 24);
       ctx.restore();
     } else if (msgT > 0) {
       var age = msgD - msgT, sc = 1 + Math.max(0, 0.18 - age) * 2.2;

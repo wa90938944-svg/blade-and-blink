@@ -2,7 +2,8 @@
 // browser (local bot / 2-player / endless modes), so every mode plays identically.
 (function (root) {
   var W = 640, H = 400, R = 13, PAR = 0.35, A0 = 0.08, A1 = 0.22;
-  var FFA_W = 1800, FFA_H = 1200;
+  var FFA_SCALE = 3;  // arena is this many times wider and taller than the original 1800x1200
+  var FFA_W = 1800 * FFA_SCALE, FFA_H = 1200 * FFA_SCALE;
   var REACH = 56, BLINK_D = 120, BLINK_REC = 0.3, CHARGE_T = 3.5, SPAWN_T = 5, SWING_CD = 0.2, BLINK_WIND = 0.1;
   var SHRINE_R = 36, EXTRACT_TIME = 1.5;
 
@@ -488,13 +489,13 @@
     }
     m.shrineTimer = (m.shrineTimer || 0) - dt;
     if (m.shrineTimer <= 0) {
-      if (m.shrines.length < 2) {
+      if (m.shrines.length < 5) {
         var sx = 120 + Math.random() * (m.boundW - 240);
         var sy = 120 + Math.random() * (m.boundH - 240);
-        m.shrines.push({ id: Math.random(), x: sx, y: sy, r: SHRINE_R, life: 40 });
+        m.shrines.push({ id: Math.random(), x: sx, y: sy, r: SHRINE_R, life: 60 });
         ev.push({ t: 'shrine_spawn', x: sx, y: sy });
       }
-      m.shrineTimer = 25;
+      m.shrineTimer = 12;
     }
   }
 
