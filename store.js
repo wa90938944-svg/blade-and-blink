@@ -58,20 +58,38 @@ function verifyPassword(password, stored) {
 }
 
 function createStore(uri) {
-  const client = new MongoClient(uri);
-  let db, users;
+  let client, db, users;
   const activeSessions = new Map();
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-  client.connect().then(() => {
-    db = client.db();
-    users = db.collection('users');
-    users.createIndex({ key: 1 }, { unique: true }).catch(() => {});
-    console.log('Connected to MongoDB Atlas successfully.');
-  }).catch(err => {
-    console.error('MongoDB connection error:', err);
-  });
+  if (!process.env.DATABASE_URL) {
+    console.warn('WARNING: DATABASE_URL is not set. Falling back to ' + uri + ' - logins will fail unless MongoDB runs there.');
+  }
 
-  async function waitForDb() { while (!users) { await new Promise(r => setTimeout(r, 50)); } }
+  // Keeps retrying in the background, so a slow or temporarily blocked database recovers by itself.
+  function connectWithRetry() {
+    client = new MongoClient(uri, { serverSelectionTimeoutMS: 8000 });
+    client.connect().then(() => {
+      db = client.db();
+      users = db.collection('users');
+      users.createIndex({ key: 1 }, { unique: true }).catch(() => {});
+      console.log('Connected to MongoDB successfully.');
+    }).catch((err) => {
+      console.error('MongoDB connection error (retrying in 5s):', err && err.message ? err.message : err);
+      client.close().catch(() => {});
+      setTimeout(connectWithRetry, 5000);
+    });
+  }
+  connectWithRetry();
+
+  // Waits briefly for the database, then fails with a clear error instead of hanging forever.
+  async function waitForDb() {
+    const start = Date.now();
+    while (!users) {
+      if (Date.now() - start > 8000) { const e = new Error('Database unavailable'); e.dbDown = true; throw e; }
+      await sleep(50);
+    }
+  }
 
   function createSession(key) {
     const token = crypto.randomBytes(32).toString('hex');

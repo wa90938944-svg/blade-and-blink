@@ -293,7 +293,7 @@ function enter(s, r) {
 
 function handle(cb, fn) {
   if (typeof cb !== 'function') return;
-  Promise.resolve().then(fn).catch((e) => { console.error(e); cb({ err: 'Server error, please try again' }); });
+  Promise.resolve().then(fn).catch((e) => { console.error(e); cb({ err: e && e.dbDown ? 'Cannot reach the database. Check DATABASE_URL and Atlas network access.' : 'Server error, please try again' }); });
 }
 
 io.on('connection', (s) => {
