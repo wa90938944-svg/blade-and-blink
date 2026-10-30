@@ -7,6 +7,28 @@
   var REACH = 56, BLINK_D = 120, BLINK_REC = 0.3, CHARGE_T = 3.5, SPAWN_T = 5, SWING_CD = 0.2, BLINK_WIND = 0.1;
   var SHRINE_R = 36, EXTRACT_TIME = 1.5;
 
+  // ---------- MASTERTETANUS boss: every number you might want to tune lives here ----------
+  var MT = {
+    HEARTS: 50,                    // boss hearts (one life)
+    SPEED: 330,                    // "superspeed" (normal player = 200)
+    REACH: REACH + 10,
+    CHARGE_T: 1.2,                 // seconds to regain one blink charge (players: 3.5)
+    MAP_SCALE: 1.5,                // arena size compared with the normal 640x400
+    PLAYER_HEARTS: { 1: 25, 2: 15, 3: 8, 4: 5 },   // hearts per player, by party size (1 = solo test only)
+    GUARD_EVERY: 5,                // seconds between bodyguard waves
+    GUARD_COUNT: 3,                // veteran bodyguards per wave
+    GUARD_MAX: 15,                 // safety valve: most guards alive at once (keeps the server fast)
+    SPLIT_MIN: 25, SPLIT_MAX: 50,  // seconds between splits (timer restarts when the clone ends)
+    SPLIT_LIFE: 10,                // seconds the clone lasts
+    REACT: 0.06,                   // boss reaction delay in seconds (0 = perfect, unfair)
+    PARRY_CHANCE: 0.82,            // chance the boss parries a swing it sees coming
+    INTRO_READY: 2.2               // countdown after pressing Challenge
+  };
+
+  var TIERS_EXTRA = {
+    mtboss: { lives: 1, maxHearts: MT.HEARTS, spd: MT.SPEED, reach: MT.REACH, scale: 1.0, chargeT: MT.CHARGE_T }
+  };
+
   var TIERS = {
     player:  { lives: 1, maxHearts: 1, spd: 200, reach: REACH, scale: 1.0 },
     novice:  { lives: 4, maxHearts: 1, spd: 185, reach: REACH, scale: 1.0 },
@@ -14,6 +36,7 @@
     apex:    { lives: 5, maxHearts: 2, spd: 204, reach: REACH + 5, scale: 1.0 },
     tetanus: { lives: 3, maxHearts: 5, spd: 175, reach: REACH + 36, scale: 2.2 }
   };
+  TIERS.mtboss = TIERS_EXTRA.mtboss;
 
   function mk(i, x, fa, y, team, tier) {
     tier = tier || 'player';
@@ -28,7 +51,8 @@
       ownerIdx: -1, at: 0, ax: 0, ay: 0,
       tier: tier, lives: cfg.lives, maxLives: cfg.lives, hearts: cfg.maxHearts, maxHearts: cfg.maxHearts,
       reach: cfg.reach, scale: scale, r: R * scale, unparryable: false,
-      bossTelegraph: 0, bossAction: null, whiffedParry: false
+      bossTelegraph: 0, bossAction: null, whiffedParry: false,
+      chargeT: cfg.chargeT || CHARGE_T, isClone: false, cloneOf: -1, life: 0, isBoss: false
     };
   }
 
@@ -116,6 +140,9 @@
   function foes(m, i) {
     var self = m.p[i];
     if (!self) return [];
+    if (m.boss) {
+      return m.p.filter(function (q) { return q && !q.dead && q.team !== self.team; });
+    }
     if (self.isMinion) {
       return m.p.filter(function (q) {
         return q && !q.dead && q.i !== self.ownerIdx && !q.isMinion;
@@ -146,7 +173,17 @@
     });
   }
 
-  function applyDamage(target, ev) {
+  function applyDamage(target, ev, m) {
+    if (target.isClone && m && m.p[target.cloneOf] && !m.p[target.cloneOf].dead) {
+      var real = m.p[target.cloneOf];
+      real.hearts--;
+      target.hearts = real.hearts;
+      ev.push({ t: 'hurt', i: target.i, x: target.x, y: target.y, hearts: real.hearts, lives: real.lives });
+      target.st = Math.max(target.st, 0.35);
+      target.sw = -1; target.pa = -1; target.bw = 0;
+      if (real.hearts <= 0) { real.lives = 0; real.dead = true; }
+      return;
+    }
     target.hearts--;
     ev.push({ t: 'hurt', i: target.i, x: target.x, y: target.y, hearts: target.hearts, lives: target.lives });
     if (target.hearts <= 0) {
@@ -169,7 +206,7 @@
     }
   }
 
-  function resolve(a, d, ev, blink) {
+  function resolve(a, d, ev, blink, m) {
     if (d.god) {
       ev.push({ t: 'god_block', x: d.x, y: d.y });
       return;
@@ -198,7 +235,7 @@
       d.bc = 0;
       d.st = 0;
       if (blink) {
-        if (!a.god) applyDamage(a, ev);
+        if (!a.god) applyDamage(a, ev, m);
         d.points = (d.points || 0) + 25;
         d.blinks = (d.blinks || 0) + 1;
         ev.push({ t: 'intercept', by: d.i, victim: a.i, x: d.x, y: d.y });
@@ -214,7 +251,7 @@
       }
       ev.push({ t: 'parry', x: d.x, y: d.y, b: !!blink, by: d.i });
     } else {
-      applyDamage(d, ev);
+      applyDamage(d, ev, m);
       a.points = (a.points || 0) + 35;
       if (d.dead) {
         a.kills = (a.kills || 0) + 1;
@@ -254,14 +291,14 @@
     var p = m.p[i];
     if (!p) return;
     var bW = m.boundW || W, bH = m.boundH || H;
-    var dist = p.tier === 'tetanus' ? BLINK_D * 1.45 : BLINK_D;
+    var dist = p.tier === 'tetanus' ? BLINK_D * 1.45 : (p.tier === 'mtboss' ? BLINK_D * 1.25 : BLINK_D);
     var nx = cl(p.x + p.bdx * dist, p.r, bW - p.r), ny = cl(p.y + p.bdy * dist, p.r, bH - p.r);
     ev.push({ t: 'blink', i: i, x1: p.x, y1: p.y, x2: nx, y2: ny, unparryable: !!p.unparryable });
     var fs = foes(m, i);
     for (var j = 0; j < fs.length && !p.dead; j++) {
       var f = fs[j];
       if (!f.dead && segd(p.x, p.y, nx, ny, f.x, f.y) < p.r + f.r - 5) {
-        resolve(p, f, ev, true);
+        resolve(p, f, ev, true, m);
       }
     }
     p.x = nx; p.y = ny; p.bc = p.noCd ? 0 : BLINK_REC; p.sw = -1;
@@ -478,6 +515,187 @@
     return o;
   }
 
+  // ================= MASTERTETANUS BOSS =================
+  var aiScratch = new WeakMap();   // AI memory lives here so it is never sent over the network
+  function aiMem(b) { var o = aiScratch.get(b); if (!o) { o = { seen: {}, roll: {}, wait: {}, tgt: -1, tgtT: 0, sgn: 1, sgnT: 0 }; aiScratch.set(b, o); } return o; }
+  function rnd(a, b) { return a + Math.random() * (b - a); }
+
+  function createBoss(nPlayers) {
+    var n = cl(nPlayers | 0, 1, 4);
+    var bW = W * MT.MAP_SCALE, bH = H * MT.MAP_SCALE, hearts = MT.PLAYER_HEARTS[n];
+    var m = {
+      boss: true, mode: 'boss', nPlayers: n, win: 1, score: [0, 0], round: 1, winner: -1,
+      boundW: bW, boundH: bH, bossIdx: n, cloneIdx: -1, cloneSlot: -1, guardT: MT.GUARD_EVERY,
+      splitT: rnd(MT.SPLIT_MIN, MT.SPLIT_MAX), time: 0, guardGen: 0, phase: 'intro', t: 0, p: []
+    };
+    for (var i = 0; i < n; i++) {
+      var pl = mk(i, 90, 0, (bH * (i + 1)) / (n + 1), 0, 'player');
+      pl.lives = 1; pl.maxLives = 1; pl.hearts = hearts; pl.maxHearts = hearts;
+      m.p.push(pl);
+    }
+    var b = mk(n, bW - 110, Math.PI, bH / 2, 1, 'mtboss');
+    b.isBoss = true;
+    m.p.push(b);
+    return m;
+  }
+  // the dialogue is over and the host pressed Challenge
+  function startBoss(m) { if (m && m.boss && m.phase === 'intro') { m.phase = 'ready'; m.t = MT.INTRO_READY; } }
+
+  function nearestFoe(m, b) {
+    var fs = foes(m, b.i), best = null, bd = 1e9;
+    for (var k = 0; k < fs.length; k++) {
+      var d = Math.hypot(fs[k].x - b.x, fs[k].y - b.y);
+      if (d < bd) { bd = d; best = fs[k]; }
+    }
+    return best;
+  }
+
+  // A veteran duelist that hunts the closest enemy (used by the boss's bodyguards)
+  var GUARD_AI = { tickMin: 0.11, tickRange: 0.1, parry: 0.38, blink: 0.25, swing: 0.55 };
+  function aiDuelist(m, b, dt, cfg) {
+    var a = nearestFoe(m, b), o = {};
+    b.at -= dt;
+    if (a && b.at <= 0) {
+      b.at = cfg.tickMin + Math.random() * cfg.tickRange;
+      var dx = a.x - b.x, dy = a.y - b.y, d = Math.hypot(dx, dy) || 1, ux = dx / d, uy = dy / d;
+      var face = Math.cos(b.fa) * ux + Math.sin(b.fa) * uy;
+      b.ax = ux; b.ay = uy;
+      if (a.sw >= 0 && a.sw < 0.2 && d < a.reach + b.r + 14 && b.pa < 0 && Math.random() < cfg.parry) {
+        o.pa = true;
+      } else if (b.ch > 0 && b.bc <= 0 && d > 60 && d <= BLINK_D + 6) {
+        var fx2 = b.x + ux * BLINK_D, fy2 = b.y + uy * BLINK_D;
+        if (segd(b.x, b.y, fx2, fy2, a.x, a.y) < b.r + a.r - 4 && !parrying(a) && Math.random() < cfg.blink) o.bl = true;
+      }
+      if (!o.pa && !o.bl) {
+        if (d < b.reach + a.r - 4 && (face > 0.65 || a.st > 0) && Math.random() < cfg.swing) {
+          o.sw = true;
+        } else if (d < b.reach + 45) {
+          var sg = Math.random() < 0.5 ? 1 : -1;
+          b.ax = ux * 0.75 - uy * 0.6 * sg; b.ay = uy * 0.75 + ux * 0.6 * sg;
+        }
+      }
+    }
+    o.x = b.ax; o.y = b.ay;
+    return o;
+  }
+
+  // The boss: picks whoever it can kill fastest, punishes parries, blinks only when the line is clean.
+  function aiBoss(m, b, dt) {
+    var fs = foes(m, b.i);
+    if (!fs.length) return { x: 0, y: 0 };
+    var mem = aiMem(b), o = {}, k, f, key;
+
+    // 1) Seeing a swing or dash coming: react after a short delay, and sometimes fail to.
+    var parryNow = false;
+    for (k = 0; k < fs.length; k++) {
+      f = fs[k];
+      var swingThreat = f.sw >= 0 && f.sw < 0.2 && Math.hypot(f.x - b.x, f.y - b.y) < f.reach + b.r + 18 &&
+        Math.abs(norm(Math.atan2(b.y - f.y, b.x - f.x) - f.fa)) < 1.3;
+      var dashThreat = f.bw > 0 && segd(f.x, f.y, f.x + f.bdx * BLINK_D, f.y + f.bdy * BLINK_D, b.x, b.y) < f.r + b.r - 4;
+      key = f.i;
+      if (swingThreat || dashThreat) {
+        if (!mem.seen[key]) { mem.seen[key] = true; mem.wait[key] = MT.REACT; mem.roll[key] = Math.random() < MT.PARRY_CHANCE; }
+        mem.wait[key] -= dt;
+        if (mem.wait[key] <= 0 && mem.roll[key]) parryNow = true;
+      } else if (f.sw < 0 && !(f.bw > 0)) {
+        delete mem.seen[key];
+      }
+    }
+    if (parryNow && b.sw < 0 && b.pa < 0 && b.bw <= 0) o.pa = true;
+
+    // 2) Choose the target that dies fastest: close, low on hearts, stunned, not guarding.
+    mem.tgtT -= dt;
+    var tgt = mem.tgt >= 0 ? m.p[mem.tgt] : null;
+    if (!tgt || tgt.dead || mem.tgtT <= 0) {
+      var best = 1e9; tgt = null;
+      for (k = 0; k < fs.length; k++) {
+        f = fs[k];
+        var sc = Math.hypot(f.x - b.x, f.y - b.y) / b.spd + f.hearts * 0.12 + (f.st > 0 ? -0.35 : 0) + (parrying(f) ? 0.45 : 0);
+        if (sc < best) { best = sc; tgt = f; }
+      }
+      mem.tgt = tgt ? tgt.i : -1; mem.tgtT = 0.4;
+    }
+    if (!tgt) return { x: 0, y: 0 };
+
+    // 3) Attack
+    var dx = tgt.x - b.x, dy = tgt.y - b.y, d = Math.hypot(dx, dy) || 1, ux = dx / d, uy = dy / d;
+    var face = Math.cos(b.fa) * ux + Math.sin(b.fa) * uy;
+    var inReach = d < b.reach + tgt.r - 4, guarding = parrying(tgt);
+    b.ax = ux; b.ay = uy;
+    mem.sgnT -= dt; if (mem.sgnT <= 0) { mem.sgn = Math.random() < 0.5 ? 1 : -1; mem.sgnT = 0.5; }
+    if (!o.pa) {
+      if (inReach && !guarding && (face > 0.7 || tgt.st > 0) && b.sw < 0 && b.sc <= 0) {
+        o.sw = true;
+      } else if (b.ch > 0 && b.bc <= 0 && b.sw < 0 && b.pa < 0 && d > 70 && d <= BLINK_D * 1.25 + 6 && !guarding && tgt.pa < 0) {
+        var bd = BLINK_D * 1.25;
+        if (segd(b.x, b.y, b.x + ux * bd, b.y + uy * bd, tgt.x, tgt.y) < b.r + tgt.r - 4) o.bl = true;
+      }
+      if (guarding && d < b.reach + 50) {      // do not walk into a raised parry: step around it and wait
+        b.ax = ux * 0.2 - uy * 0.9 * mem.sgn; b.ay = uy * 0.2 + ux * 0.9 * mem.sgn;
+      }
+    }
+    o.x = b.ax; o.y = b.ay;
+    return o;
+  }
+
+  function spawnGuard(m, ev) {
+    var boss = m.p[m.bossIdx];
+    if (!boss || boss.dead) return null;
+    var bW = m.boundW, bH = m.boundH, idx = -1, k;
+    for (k = 0; k < m.p.length; k++) {          // reuse a finished guard's slot so the list never grows forever
+      var q = m.p[k];
+      if (q && q.isMinion && q.dead && q.rip) { idx = k; break; }
+    }
+    if (idx < 0) idx = m.p.length;
+    var a = Math.random() * 6.283;
+    var x = cl(boss.x + Math.cos(a) * 48, R + 5, bW - R - 5), y = cl(boss.y + Math.sin(a) * 48, R + 5, bH - R - 5);
+    var g = mk(idx, x, boss.fa, y, 1, 'veteran');
+    g.isMinion = true; g.ownerIdx = m.bossIdx;
+    g.lives = 1; g.maxLives = 1; g.hearts = 1; g.maxHearts = 1;
+    g.st = 0.35; g.gen = ++m.guardGen;
+    m.p[idx] = g;
+    ev.push({ t: 'spawn_minion', i: idx, x: x, y: y, owner: m.bossIdx });
+    return g;
+  }
+
+  function spawnClone(m, ev) {
+    var boss = m.p[m.bossIdx];
+    if (!boss || boss.dead) return;
+    var bW = m.boundW, bH = m.boundH, a = Math.random() * 6.283;
+    var idx = m.cloneSlot >= 0 ? m.cloneSlot : m.p.length;
+    var c = mk(idx, cl(boss.x + Math.cos(a) * 50, R + 5, bW - R - 5), boss.fa, cl(boss.y + Math.sin(a) * 50, R + 5, bH - R - 5), 1, 'mtboss');
+    c.isClone = true; c.cloneOf = m.bossIdx; c.life = MT.SPLIT_LIFE;
+    c.hearts = boss.hearts; c.maxHearts = boss.maxHearts; c.ch = boss.ch; c.st = 0.3;
+    m.p[idx] = c; m.cloneSlot = idx; m.cloneIdx = idx;
+    ev.push({ t: 'clone_spawn', i: idx, x: c.x, y: c.y });
+  }
+
+  function bossStep(m, dt, ev) {
+    m.time += dt;
+    var boss = m.p[m.bossIdx];
+    if (!boss || boss.dead) return;
+    m.guardT -= dt;
+    if (m.guardT <= 0) {
+      m.guardT = MT.GUARD_EVERY;
+      var alive = 0, k;
+      for (k = 0; k < m.p.length; k++) if (m.p[k] && m.p[k].isMinion && !m.p[k].dead) alive++;
+      for (k = 0; k < MT.GUARD_COUNT && alive < MT.GUARD_MAX; k++) { if (spawnGuard(m, ev)) alive++; }
+    }
+    var clone = m.cloneIdx >= 0 ? m.p[m.cloneIdx] : null;
+    if (clone && !clone.dead) {
+      clone.life -= dt; clone.hearts = boss.hearts;
+      if (clone.life <= 0) {
+        clone.dead = true; clone.rip = true;
+        ev.push({ t: 'clone_end', i: clone.i, x: clone.x, y: clone.y });
+        m.cloneIdx = -1; m.splitT = rnd(MT.SPLIT_MIN, MT.SPLIT_MAX);   // the timer restarts when the ability ends
+      }
+    } else {
+      if (clone) { m.cloneIdx = -1; m.splitT = rnd(MT.SPLIT_MIN, MT.SPLIT_MAX); }
+      m.splitT -= dt;
+      if (m.splitT <= 0) spawnClone(m, ev);
+    }
+  }
+
   function updateShrines(m, dt, ev) {
     m.shrines = m.shrines || [];
     for (var i = m.shrines.length - 1; i >= 0; i--) {
@@ -526,7 +744,9 @@
       p = m.p[i];
       if (!p || p.dead) continue;
       if (p.isMinion) {
-        inp[i] = bodyguardAI(m, p, dt);
+        inp[i] = m.boss ? aiDuelist(m, p, dt, GUARD_AI) : bodyguardAI(m, p, dt);
+      } else if (m.boss && p.tier === 'mtboss') {
+        inp[i] = aiBoss(m, p, dt);
       } else if (i === 1 && m.mode === '1v1' && m.botTier && m.botTier !== 'player') {
         if (p.tier === 'novice') inp[i] = aiNovice(m, p, dt);
         else if (p.tier === 'veteran') inp[i] = aiVeteran(m, p, dt);
@@ -540,7 +760,7 @@
       if (p.noCd) {
         p.ch = 3; p.rc = CHARGE_T; p.st = 0; p.bc = 0; p.sc = 0;
       } else {
-        if (p.ch < 3) { p.rc += dt; if (p.rc >= CHARGE_T) { p.ch++; p.rc = 0; } }
+        if (p.ch < 3) { p.rc += dt; if (p.rc >= (p.chargeT || CHARGE_T)) { p.ch++; p.rc = 0; } }
         if (p.st > 0) p.st -= dt;
         if (p.bc > 0) p.bc -= dt;
         if (p.sc > 0) p.sc -= dt;
@@ -628,9 +848,24 @@
         var edx = o.x - p.x, edy = o.y - p.y;
         var totalReach = p.reach || REACH;
         if (Math.hypot(edx, edy) < o.r + totalReach && Math.abs(norm(Math.atan2(edy, edx) - p.fa)) < 1.05) {
-          p.hs.push(o.i); resolve(p, o, ev);
+          p.hs.push(o.i); resolve(p, o, ev, false, m);
         }
       }
+    }
+
+    if (m.boss) {
+      m.p.forEach(function (c) {
+        if (c && c.dead && !c.rip) { c.rip = true; ev.push({ t: 'kill', i: c.i, x: c.x, y: c.y }); }
+      });
+      var bossP = m.p[m.bossIdx];
+      var playersAlive = m.p.some(function (c) { return c && c.team === 0 && !c.dead; });
+      if (bossP && bossP.dead) {
+        m.p.forEach(function (c) { if (c && c.team === 1 && !c.dead) { c.dead = true; c.rip = true; } });
+        m.phase = 'roundend'; m.t = 1.7; m.score[0] = 1;
+      } else if (!playersAlive) {
+        m.phase = 'roundend'; m.t = 1.7; m.score[1] = 1;
+      }
+      return;
     }
 
     if (m.endless) {
@@ -693,6 +928,7 @@
     if (m.phase === 'ready') { m.t -= dt; if (m.t <= 0) m.phase = 'fight'; }
     else if (m.phase === 'fight') {
       if (m.endless) endlessStep(m, inp, dt, ev);
+      if (m.boss) bossStep(m, dt, ev);
       simulate(m, inp, dt, ev);
     } else if (m.phase === 'roundend') {
       m.t -= dt;
@@ -708,7 +944,7 @@
   var api = {
     W: W, H: H, FFA_W: FFA_W, FFA_H: FFA_H, R: R, PAR: PAR, A0: A0, A1: A1, REACH: REACH, CHARGE_T: CHARGE_T,
     SWING_CD: SWING_CD, BLINK_D: BLINK_D, BLINK_WIND: BLINK_WIND, SHRINE_R: SHRINE_R, EXTRACT_TIME: EXTRACT_TIME,
-    TIERS: TIERS, create: create, create2v2: create2v2, createEndless: createEndless, createFFA: createFFA, spawnBodyguard: spawnBodyguard, tick: tick
+    TIERS: TIERS, MT: MT, createBoss: createBoss, startBoss: startBoss, create: create, create2v2: create2v2, createEndless: createEndless, createFFA: createFFA, spawnBodyguard: spawnBodyguard, tick: tick
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Shared = api;

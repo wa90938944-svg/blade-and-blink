@@ -14,7 +14,7 @@ const store = createStore(process.env.DATABASE_URL || 'mongodb://127.0.0.1:27017
 const app = express();
 app.use(express.static(path.join(__dirname, 'public'), { setHeaders: (res) => res.setHeader('Cache-Control', 'no-cache') }));
 const server = http.createServer(app);
-const io = new Server(server);
+const io = new Server(server, { cors: { origin: [/\.itch\.zone$/, /\.itch\.io$/, /^https:\/\/itch\.io$/] } });
 
 // ---------- Matchmaking & State ----------
 let queue = [];
@@ -88,6 +88,63 @@ async function startRoom(users, mode, unranked) {
     u.s.emit('match', Object.assign({ you: i }, info));
   });
   console.log(`[room ${id}] ${mode} started: ${names.join(', ')}`);
+}
+
+// ---------- MASTERTETANUS boss room (private party, 1 to 4 players) ----------
+async function startBossRoom(users, hostKey) {
+  const id = crypto.randomBytes(4).toString('hex');
+  const matchObj = G.createBoss(users.length);
+  const room = {
+    id, users, m: matchObj, inp: users.map(() => ({})), done: false, mode: 'boss', unranked: true,
+    boss: true, hostIdx: Math.max(0, users.findIndex((u) => u.key === hostKey)), evq: [], flip: false
+  };
+  rooms.set(id, room);
+
+  const names = users.map((u) => u.name);
+  const ranks = users.map((u) => rankOf(u.mmr, u.name));
+  const mmrs = users.map((u) => u.mmr);
+  const looks = [];
+  for (let i = 0; i < users.length; i++) {
+    const prof = await store.profile(users[i].key);
+    looks.push((prof && prof.equipped && prof.equipped.look) || 'none');
+  }
+  names.push('MASTERTETANUS'); looks.push('none'); ranks.push('Owner'); mmrs.push(9999);
+  const teams = users.map(() => 0).concat([1]);
+  const info = { id, names, ranks, mmrs, looks, mode: 'boss', unranked: true, teams, hostIdx: room.hostIdx, nPlayers: users.length };
+
+  users.forEach((u, i) => {
+    u.s.join(id);
+    u.s.data.room = room;
+    u.s.data.idx = i;
+    u.s.emit('match', Object.assign({ you: i }, info));
+  });
+  console.log(`[room ${id}] MASTERTETANUS boss started: ${users.map((u) => u.name).join(', ')}`);
+}
+
+async function finishBoss(room, playersWon, forfeit) {
+  if (room.done) return;
+  room.done = true;
+  rooms.delete(room.id);
+  io.to(room.id).emit('s', { m: room.m, ev: room.evq || [] });
+  room.users.forEach(async (u) => {
+    if (!u) return;
+    u.s.leave(room.id);
+    u.s.data.room = null;
+    const prof = await store.profile(u.key);
+    u.s.emit('end', { mode: 'boss', unranked: true, boss: true, playersWon: !!playersWon, forfeit: !!forfeit, you: u.s.data.idx, profile: prof });
+  });
+}
+
+// One player leaves a boss fight (forfeit or disconnect) without ending it for everyone else
+function dropFromBoss(s, room) {
+  const idx = s.data.idx;
+  const p = room.m.p[idx];
+  if (p && !p.dead) { p.hearts = 0; p.lives = 0; p.dead = true; }
+  room.users[idx] = null;
+  s.leave(room.id);
+  s.data.room = null;
+  s.emit('end', { mode: 'boss', unranked: true, boss: true, playersWon: false, forfeit: true, you: idx });
+  if (room.users.every((u) => !u)) { room.done = true; rooms.delete(room.id); }
 }
 
 // Slither-style immediate drop-in
@@ -220,7 +277,13 @@ setInterval(() => {
   for (const room of rooms.values()) {
     const ev = G.tick(room.m, room.inp, dt);
     room.inp.forEach((u) => { if (u) { u.sw = u.pa = u.bl = false; } });
-    io.to(room.id).emit('s', { m: room.m, ev });
+    if (room.boss) {
+      room.evq = (room.evq || []).concat(ev);
+      room.flip = !room.flip;
+      if (!room.flip) { io.to(room.id).emit('s', { m: room.m, ev: room.evq }); room.evq = []; }
+    } else {
+      io.to(room.id).emit('s', { m: room.m, ev });
+    }
 
     (ev || []).forEach(async (e) => {
       if (e.t === 'extract') {
@@ -253,7 +316,8 @@ setInterval(() => {
     });
 
     if (room.m.phase === 'over' && !room.ffa) {
-      finish(room, room.m.winner, false);
+      if (room.boss) finishBoss(room, room.m.winner === 0, false);
+      else finish(room, room.m.winner, false);
     }
   }
 }, 1000 / 60);
@@ -382,6 +446,26 @@ io.on('connection', (s) => {
 
   s.on('unqueue', () => { queue = queue.filter((q) => q.s !== s); });
 
+  // The Tetanus fight runs in the browser, so the server only accepts a win if the fight was
+  // really started (one-time token) and lasted a believable amount of time.
+  s.on('tetanusStart', (cb) => handle(cb, async () => {
+    if (!authed(s)) return cb({ err: 'Log in first' });
+    const token = crypto.randomBytes(16).toString('hex');
+    s.data.tet = { token, at: Date.now() };
+    cb({ ok: true, token });
+  }));
+
+  s.on('tetanusWin', (d, cb) => handle(cb, async () => {
+    if (!authed(s)) return cb({ err: 'Log in first' });
+    const t = s.data.tet;
+    s.data.tet = null;                                   // single use
+    d = d || {};
+    if (!t || typeof d.token !== 'string' || d.token !== t.token) return cb({ err: 'No active Tetanus fight' });
+    if (Date.now() - t.at < 8000) return cb({ err: 'That was too fast to be real' });
+    await store.setBeatTetanus(s.data.key);
+    cb({ ok: true, profile: await store.profile(s.data.key) });
+  }));
+
   // Direct drop-in to persistent Slither-style FFA
   s.on('joinFFA', async (cb) => handle(cb, async () => {
     if (s.data.room) return cb({ err: 'Already in a match' });
@@ -395,7 +479,7 @@ io.on('connection', (s) => {
   function broadcastParty(party) {
     const list = party.members.map(m => ({ name: m.name, key: m.key, ready: !!m.ready }));
     party.members.forEach(m => {
-      m.s.emit('partyUpdate', { code: party.code, host: party.host === m.key, mode: party.mode, members: list });
+      m.s.emit('partyUpdate', { code: party.code, host: party.host === m.key, mode: party.mode, members: list, canBoss: !!party.hostCanBoss });
     });
   }
 
@@ -421,8 +505,12 @@ io.on('connection', (s) => {
     leaveParty(s);
     const p = await store.profile(s.data.key);
     const code = generatePartyCode();
-    const mode = (d && d.mode === '2v2') ? '2v2' : '1v1';
-    const party = { code, host: s.data.key, mode, members: [{ s, key: s.data.key, name: p.name, mmr: p.mmr, ready: true }] };
+    let mode = (d && d.mode === '2v2') ? '2v2' : '1v1';
+    if (d && d.mode === 'boss') {
+      if (!p.beatTetanus) return cb({ err: 'Beat the secret boss Tetanus first to host this fight' });
+      mode = 'boss';
+    }
+    const party = { code, host: s.data.key, mode, hostCanBoss: !!p.beatTetanus, members: [{ s, key: s.data.key, name: p.name, mmr: p.mmr, ready: true }] };
     parties.set(code, party);
     broadcastParty(party);
     cb({ ok: true, code });
@@ -434,7 +522,7 @@ io.on('connection', (s) => {
     const code = String(d.code || '').trim().toUpperCase();
     const party = parties.get(code);
     if (!party) return cb({ err: 'Party not found' });
-    const max = party.mode === '2v2' ? 4 : 2;
+    const max = (party.mode === '2v2' || party.mode === 'boss') ? 4 : 2;
     if (party.members.length >= max) return cb({ err: 'Party is full' });
     leaveParty(s);
     const p = await store.profile(s.data.key);
@@ -446,7 +534,8 @@ io.on('connection', (s) => {
   s.on('partySetMode', (d) => {
     for (const party of parties.values()) {
       if (party.host === s.data.key) {
-        party.mode = d && d.mode === '2v2' ? '2v2' : '1v1';
+        if (d && d.mode === 'boss') { if (party.hostCanBoss && party.members.length <= 4) party.mode = 'boss'; }
+        else party.mode = d && d.mode === '2v2' ? '2v2' : '1v1';
         broadcastParty(party);
         break;
       }
@@ -467,12 +556,19 @@ io.on('connection', (s) => {
   s.on('partyStart', async (cb) => handle(cb, async () => {
     for (const [code, party] of parties.entries()) {
       if (party.host === s.data.key) {
-        const need = party.mode === '2v2' ? 4 : 2;
-        if (party.members.length !== need) return cb({ err: 'Need ' + need + ' players' });
+        const hostPriv = await getPriv(s);
+        if (party.mode === 'boss') {
+          const minP = hostPriv.o ? 1 : 2;          // only the owner may test the boss alone
+          if (party.members.length < minP || party.members.length > 4) return cb({ err: 'MASTERTETANUS needs ' + minP + ' to 4 players' });
+        } else {
+          const need = party.mode === '2v2' ? 4 : 2;
+          if (party.members.length !== need) return cb({ err: 'Need ' + need + ' players' });
+        }
         const ready = party.members.every(m => m.ready || m.key === party.host);
         if (!ready) return cb({ err: 'All players must be ready' });
         parties.delete(code);
-        startRoom(party.members, party.mode, true);
+        if (party.mode === 'boss') startBossRoom(party.members, party.host);
+        else startRoom(party.members, party.mode, true);
         return cb({ ok: true });
       }
     }
@@ -659,8 +755,19 @@ io.on('connection', (s) => {
     io.to(room.id).emit('chat_msg', { name: p.name, msg: msg, i: s.data.idx });
   });
 
+  s.on('bossChallenge', () => {
+    const room = s.data.room;
+    if (!room || !room.boss || room.m.phase !== 'intro' || s.data.idx !== room.hostIdx) return;
+    G.startBoss(room.m);
+  });
+
   s.on('forfeit', () => {
     const room = s.data.room;
+    if (room && room.boss) {
+      if (room.m.phase === 'intro' && s.data.idx === room.hostIdx) finishBoss(room, false, true);   // host backs out: everyone returns to the menu
+      else dropFromBoss(s, room);
+      return;
+    }
     if (room === ffaWorld) {
       leaveFFA({ s }, false, 0);
       s.emit('end', { mode: 'ffa', extracted: false, points: 0, delta: 0 });
@@ -677,6 +784,8 @@ io.on('connection', (s) => {
     leaveParty(s);
     if (s.data.room === ffaWorld) {
       leaveFFA({ s }, false, 0);
+    } else if (s.data.room && s.data.room.boss) {
+      dropFromBoss(s, s.data.room);
     } else if (s.data.room) {
       finish(s.data.room, 1 - s.data.idx, true, s.data.idx);
     }

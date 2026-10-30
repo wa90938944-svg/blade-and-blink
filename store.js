@@ -10,8 +10,9 @@ const OWNER_KEY = 'mastertetanus';
 
 const RANK_NAMES = ['Bronze', 'Silver', 'Gold', 'Platinum', 'Diamond', 'Owner'];
 const COSMETICS = { look: { none: 'Bronze', bronze: 'Silver', silver: 'Silver', gold: 'Gold', platinum: 'Platinum', diamond: 'Diamond' } };
-const ALL_LOOKS = ['none', 'bronze', 'silver', 'gold', 'platinum', 'diamond'];
-const LOOK_ORDER = ['none', 'bronze', 'silver', 'gold', 'platinum', 'diamond'];
+// 'mastertetanus' is never handed out by rank: only the owner account gets it
+const ALL_LOOKS = ['none', 'bronze', 'silver', 'gold', 'platinum', 'diamond', 'mastertetanus'];
+const LOOK_ORDER = ['none', 'bronze', 'silver', 'gold', 'platinum', 'diamond'];   // owner-only look is deliberately not here
 const topLook = (unlocked) => { let t = 'none'; for (const id of LOOK_ORDER) if (unlocked.includes(id)) t = id; return t; };
 
 const isOwnerAccount = (rawName) => rawName === OWNER_NAME;
@@ -124,7 +125,7 @@ function createStore(uri) {
       mmr: isOwner ? 9999 : START_MMR, peak: isOwner ? 9999 : START_MMR,
       wins: 0, losses: 0, games: 0, streak: 0,
       unlocked: earned, equipped: { look: isOwner ? 'diamond' : 'none' },
-      isOwner: isOwner, isAdmin: false, banned: false, banReason: '',
+      isOwner: isOwner, isAdmin: false, banned: false, banReason: '', beatTetanus: false,
       created: Date.now(), seen: Date.now()
     };
     try {
@@ -170,7 +171,8 @@ function createStore(uri) {
       name: user.name, mmr: user.mmr, rank: rankOf(user.mmr, user.name),
       wins: user.wins, losses: user.losses, streak: user.streak, peak: user.peak, games: user.games,
       unlocked: unlocked, equipped: { look: unlocked.includes(look) ? look : topLook(unlocked) },
-      isOwner: isOwner, isAdmin: !!user.isAdmin, banned: !!user.banned, savedAt: user.seen || Date.now()
+      isOwner: isOwner, isAdmin: !!user.isAdmin, banned: !!user.banned, savedAt: user.seen || Date.now(),
+      beatTetanus: isOwner || !!user.beatTetanus
     };
   }
 
@@ -288,12 +290,18 @@ function createStore(uri) {
     return { ok: true, mmr: newMmr, rank: rankOf(newMmr, target.name) };
   }
 
+  async function setBeatTetanus(key) {
+    await waitForDb();
+    await users.updateOne({ key }, { $set: { beatTetanus: true, seen: Date.now() } });
+    return { ok: true };
+  }
+
   async function flush() { return true; }
 
   return {
     register, login, resume, claim, sessionValid, tokenMatches, logout,
     saveData, equip, profile, record, bankExtracted, ffaDeathPenalty, top, flush,
-    adminGetUsers, adminSetBan, adminSetMmr, adminSetAdmin, adminGetBans
+    adminGetUsers, adminSetBan, adminSetMmr, adminSetAdmin, adminGetBans, setBeatTetanus
   };
 }
 
