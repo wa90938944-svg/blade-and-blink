@@ -29,7 +29,7 @@
     { id: 'platinum', name: 'Ronin', need: 'Platinum', desc: 'A wide-brimmed ronin hat and a chest plate.' },
     { id: 'diamond', name: 'Champion', need: 'Diamond', desc: 'Crossed scars, a crown and aura, and diamond dash sparks.' }
   ];
-  var TRAIL_TINT = { silver: '#d6d2c8', gold: '#e5b842', platinum: '#c9331f', mastertetanus: '#e0b64a' };
+  var TRAIL_TINT = { silver: '#d6d2c8', gold: '#e5b842', platinum: '#c9331f', mastertetanus: '#ffe9a0' };
   var looks = ['none', 'none'];
   var teams = [0, 1];
   var godActive = false, noCdActive = false, fastActive = false;
@@ -42,8 +42,11 @@
 
   // ---------- MASTERTETANUS boss fight state ----------
   var MT_GOLD = '#b58a2e', MT_GOLD_HI = '#e0b64a', MT_CRIM = '#8a1a12', MT_BLACK = '#120e0d';
+  // divine palette: white-gold light, with a thin crimson edge so he still reads as an anti-hero
+  var DV_WHITE = '#fffaf0', DV_CREAM = '#fff1b8', DV_GOLD = '#f2c75c', DV_GOLD_D = '#b8860b', DV_DEEP = '#6b4a08', DV_EYE = '#c9331f';
+  var mtBarLag = 1;
   var bossHostIdx = 0, tetToken = '', mtForfeitSelf = false, mtBanOn = false;
-  var OWNER_LOOK = { id: 'mastertetanus', name: 'MASTERTETANUS', need: 'Owner', desc: 'A fallen god: black and gold, an unbroken halo and drifting gold shards. Owner only.' };
+  var OWNER_LOOK = { id: 'mastertetanus', name: 'MASTERTETANUS', need: 'Owner', desc: 'Divine: a blazing white-gold body, wings of light, a double halo and rising gold motes. Owner only.' };
   function isNet() { return mode === 'online' || mode === 'ffa' || mode === '2v2' || mode === 'boss'; }
   function allLooks() { return LOOKS.concat(prof && prof.isOwner ? [OWNER_LOOK] : []); }
 
@@ -61,6 +64,49 @@
       if (i) g.lineTo(px + Math.cos(a) * r, py + Math.sin(a) * r); else g.moveTo(px + Math.cos(a) * r, py + Math.sin(a) * r);
     }
     g.closePath();
+  }
+  // Light wings: two fans of feathers behind the fighter, breathing slowly. Drawn beside the body, so the body stays player-sized.
+  function divineWings(g, px, py, now, alpha, big) {
+    var s, i, flap = Math.sin(now / 520), n = big ? 6 : 5;
+    g.save();
+    for (s = -1; s <= 1; s += 2) {
+      for (i = 0; i < n; i++) {
+        var a = -0.15 - i * 0.3 + flap * 0.05, len = (big ? 34 : 28) - i * 2.2 + flap * 1.5;
+        var bx = px + s * 4, by = py - 1 + i * 0.4;
+        var tx = bx + s * Math.cos(a) * len, ty = by + Math.sin(a) * len;
+        var mx = (bx + tx) / 2, my = (by + ty) / 2, nx = -(ty - by), ny = (tx - bx), nl = Math.hypot(nx, ny) || 1;
+        nx = nx / nl * 3.4; ny = ny / nl * 3.4;
+        g.globalAlpha = alpha * (0.55 - i * 0.05);
+        g.fillStyle = i % 2 ? DV_CREAM : DV_WHITE;
+        g.beginPath(); g.moveTo(bx, by); g.quadraticCurveTo(mx + nx, my + ny, tx, ty); g.quadraticCurveTo(mx - nx, my - ny, bx, by); g.closePath(); g.fill();
+        g.globalAlpha = alpha * 0.5; g.strokeStyle = DV_GOLD; g.lineWidth = 0.9; g.stroke();
+      }
+    }
+    g.restore();
+  }
+  // Radiant glow, slow rotating rays and the wings, all in light
+  function divineAura(g, px, py, now, alpha, wings, big) {
+    var pu = 0.5 + 0.5 * Math.sin(now / 650), k, rot = now / 4200;
+    var gr = g.createRadialGradient(px, py, R * 0.6, px, py, R + 30 + pu * 4);
+    gr.addColorStop(0, 'rgba(255,236,170,' + (0.5 * alpha).toFixed(3) + ')');
+    gr.addColorStop(0.55, 'rgba(255,214,110,' + (0.2 * alpha).toFixed(3) + ')');
+    gr.addColorStop(1, 'rgba(255,214,110,0)');
+    g.fillStyle = gr; g.beginPath(); g.arc(px, py, R + 30 + pu * 4, 0, 6.283); g.fill();
+    g.save(); g.lineCap = 'round';
+    for (k = 0; k < 12; k++) {
+      var a = rot + k * 0.5236, long = k % 2 === 0, r0 = R + 5, r1 = R + (long ? 24 : 15) + pu * 3;
+      g.globalAlpha = alpha * (long ? 0.55 : 0.35); g.strokeStyle = long ? DV_WHITE : DV_GOLD; g.lineWidth = long ? 1.6 : 1;
+      g.beginPath(); g.moveTo(px + Math.cos(a) * r0, py + Math.sin(a) * r0); g.lineTo(px + Math.cos(a) * r1, py + Math.sin(a) * r1); g.stroke();
+    }
+    g.restore();
+    if (wings) divineWings(g, px, py, now, alpha, big);
+    // outer dashed ring turning the other way, then the whole inner halo
+    g.save(); g.translate(px, py); g.rotate(-now / 3200);
+    g.setLineDash([6, 7]); g.strokeStyle = DV_GOLD; g.lineWidth = 1.4; g.globalAlpha = alpha * 0.8;
+    g.beginPath(); g.arc(0, 0, R + 15, 0, 6.283); g.stroke(); g.setLineDash([]);
+    g.restore();
+    godlyHalo(g, px, py, now, R + 7, alpha, true);
+    g.globalAlpha = 1;
   }
   // Tilted gold ring behind the fighter, broken in one place unless `whole`, with shards drifting off it
   function godlyHalo(g, px, py, now, r, alpha, whole) {
@@ -81,10 +127,7 @@
   }
   function lookBelow(g, look, px, py, c, now) {
     if (look === 'mastertetanus') {
-      var pu0 = 0.5 + 0.5 * Math.sin(now / 700);
-      g.strokeStyle = hexA(MT_GOLD, 0.14 + 0.12 * pu0); g.lineWidth = 3;
-      g.beginPath(); g.arc(px, py, R + 11 + pu0 * 3, 0, 6.283); g.stroke();
-      godlyHalo(g, px, py, now, R + 6, 0.95, true);
+      divineAura(g, px, py, now, 0.95, true, false);
       return;
     }
     if (look !== 'diamond') return;
@@ -102,9 +145,13 @@
     var secondary = isRed ? '#ffe8d6' : '#9e9788';
 
     if (look === 'mastertetanus') {
-      g.strokeStyle = MT_CRIM; g.lineWidth = 2.2; g.beginPath(); g.arc(px, py, R - 1.6, 0, 6.283); g.stroke();
-      g.strokeStyle = MT_GOLD_HI; g.lineWidth = 1.3; g.beginPath(); g.arc(px, py, R * 0.62, 0, 6.283); g.stroke();
-      g.fillStyle = MT_GOLD_HI; g.beginPath(); g.moveTo(px, py - 3.4); g.lineTo(px + 2.4, py); g.lineTo(px, py + 3.4); g.lineTo(px - 2.4, py); g.closePath(); g.fill();
+      var bg0 = g.createRadialGradient(px - R * 0.25, py - R * 0.3, 1, px, py, R);
+      bg0.addColorStop(0, DV_WHITE); bg0.addColorStop(0.6, DV_CREAM); bg0.addColorStop(1, DV_GOLD);
+      g.fillStyle = bg0; g.beginPath(); g.arc(px, py, R, 0, 6.283); g.fill();
+      g.strokeStyle = c; g.lineWidth = 2.4; g.beginPath(); g.arc(px, py, R - 1.2, 0, 6.283); g.stroke();
+      g.strokeStyle = DV_GOLD_D; g.lineWidth = 1.2; g.beginPath(); g.arc(px, py, R * 0.6, 0, 6.283); g.stroke();
+      g.fillStyle = DV_GOLD_D; g.beginPath(); g.moveTo(px, py - 4); g.lineTo(px + 2.8, py); g.lineTo(px, py + 4); g.lineTo(px - 2.8, py); g.closePath(); g.fill();
+      g.fillStyle = DV_WHITE; g.beginPath(); g.arc(px, py, 1.3, 0, 6.283); g.fill();
     } else if (look === 'bronze') {
       strokePath(g, [[-0.8, -0.6], [-0.2, -0.12], [0.08, 0.1], [0.78, 0.62]], px, py, accentBone, 2.0);
     } else if (look === 'silver') {
@@ -152,12 +199,13 @@
     var isRed = (c === COL[1]);
     g.globalAlpha = dim ? 0.45 : 1; g.lineCap = 'round';
     g.beginPath(); g.moveTo(x0, y0); g.lineTo(x1, y1);
-    if (look === 'mastertetanus') { g.strokeStyle = MT_GOLD_HI; g.lineWidth = 10; g.stroke(); }
+    if (look === 'mastertetanus') { g.strokeStyle = 'rgba(255,225,130,0.45)'; g.lineWidth = 14; g.stroke(); g.strokeStyle = DV_GOLD; g.lineWidth = 10; g.stroke(); }
     else if (look === 'gold') { g.strokeStyle = GOLD; g.lineWidth = 9.5; g.stroke(); }
     else if (look === 'silver') { g.strokeStyle = '#d6d2c8'; g.lineWidth = 8.5; g.stroke(); }
     else if (look === 'platinum') { g.strokeStyle = isRed ? '#ffffff' : '#c9331f'; g.lineWidth = 9.0; g.stroke(); }
     g.strokeStyle = INK; g.lineWidth = 7; g.stroke();
     g.strokeStyle = BONE; g.lineWidth = 3; g.stroke();
+    if (look === 'mastertetanus') { g.strokeStyle = DV_WHITE; g.lineWidth = 5.5; g.stroke(); g.strokeStyle = DV_CREAM; g.lineWidth = 2; g.stroke(); }
     var gr = g.createLinearGradient(x1, y1, x0, y0);
     gr.addColorStop(0, hexA(c, 0.95)); gr.addColorStop(0.5, hexA(c, 0)); gr.addColorStop(1, hexA(c, 0));
     g.strokeStyle = gr; g.lineWidth = 3.2; g.stroke();
@@ -269,31 +317,33 @@
     g.strokeStyle = BONE; g.lineWidth = 2; g.stroke();
   }
 
-  // MASTERTETANUS: calm, superior, a fallen god. Black cloak, crimson trim, worn gold, a cracked halo.
+  // MASTERTETANUS: divine. A blazing white-gold body, wings of light, a double halo, a thin crimson edge.
   function drawMasterBoss(g, px, py, fa, now, p) {
     var clone = !!p.isClone, st = p.st > 0, pu = 0.5 + 0.5 * Math.sin(now / 700);
     var ca = Math.cos(fa), sa = Math.sin(fa), nx = -sa, ny = ca, s;
     g.save();
-    g.globalAlpha = clone ? 0.55 : 1;
-    g.strokeStyle = hexA(MT_GOLD, 0.12 + 0.12 * pu); g.lineWidth = 3;
-    g.beginPath(); g.arc(px, py, R + 11 + pu * 3, 0, 6.283); g.stroke();
-    godlyHalo(g, px, py, now, R + 6, clone ? 0.45 : 0.85, false);
-    g.globalAlpha = clone ? 0.55 : 1;
-    g.fillStyle = st ? '#5b4f4a' : MT_BLACK; g.beginPath(); g.arc(px, py, R, 0, 6.283); g.fill();
-    g.strokeStyle = MT_CRIM; g.lineWidth = 2.4; g.beginPath(); g.arc(px, py, R - 1.6, 0, 6.283); g.stroke();
-    g.strokeStyle = MT_GOLD; g.lineWidth = 1.2; g.beginPath(); g.arc(px, py, R * 0.62, 0, 6.283); g.stroke();
-    g.fillStyle = MT_GOLD_HI; g.beginPath(); g.moveTo(px, py - 3.2); g.lineTo(px + 2.3, py); g.lineTo(px, py + 3.2); g.lineTo(px - 2.3, py); g.closePath(); g.fill();
-    g.strokeStyle = '#d6402c'; g.lineWidth = 1.8; g.lineCap = 'round';
+    divineAura(g, px, py, now, clone ? 0.5 : 1, true, true);
+    g.globalAlpha = clone ? 0.6 : 1;
+    var bg = g.createRadialGradient(px - R * 0.25, py - R * 0.3, 1, px, py, R);
+    if (st) { bg.addColorStop(0, '#e8e2d0'); bg.addColorStop(1, '#a89f86'); }
+    else { bg.addColorStop(0, DV_WHITE); bg.addColorStop(0.55, DV_CREAM); bg.addColorStop(1, DV_GOLD); }
+    g.fillStyle = bg; g.beginPath(); g.arc(px, py, R, 0, 6.283); g.fill();
+    g.strokeStyle = MT_CRIM; g.lineWidth = 1.8; g.beginPath(); g.arc(px, py, R - 0.9, 0, 6.283); g.stroke();
+    g.strokeStyle = DV_GOLD_D; g.lineWidth = 1.2; g.beginPath(); g.arc(px, py, R * 0.62, 0, 6.283); g.stroke();
+    g.fillStyle = DV_GOLD_D; g.beginPath(); g.moveTo(px, py - 3.6); g.lineTo(px + 2.6, py); g.lineTo(px, py + 3.6); g.lineTo(px - 2.6, py); g.closePath(); g.fill();
+    g.fillStyle = DV_WHITE; g.beginPath(); g.arc(px, py, 1.2, 0, 6.283); g.fill();
+    g.strokeStyle = DV_EYE; g.lineWidth = 1.9; g.lineCap = 'round';
     for (s = -1; s <= 1; s += 2) {
-      var ex = px + ca * 5.2 + nx * 4.2 * s, ey = py + sa * 5.2 + ny * 4.2 * s;
-      g.beginPath(); g.moveTo(ex - ca * 1.6, ey - sa * 1.6); g.lineTo(ex + ca * 1.6, ey + sa * 1.6); g.stroke();
+      var ex = px + ca * 5.4 + nx * 4.2 * s, ey = py + sa * 5.4 + ny * 4.2 * s;
+      g.beginPath(); g.moveTo(ex - ca * 1.7, ey - sa * 1.7); g.lineTo(ex + ca * 1.7, ey + sa * 1.7); g.stroke();
     }
-    var x0 = px + ca * R * 0.4, y0 = py + sa * R * 0.4, x1 = px + ca * (R + 18), y1 = py + sa * (R + 18);
+    var x0 = px + ca * R * 0.4, y0 = py + sa * R * 0.4, x1 = px + ca * (R + 19), y1 = py + sa * (R + 19);
     g.beginPath(); g.moveTo(x0, y0); g.lineTo(x1, y1);
-    g.strokeStyle = MT_BLACK; g.lineWidth = 7.5; g.stroke();
-    g.strokeStyle = MT_GOLD; g.lineWidth = 4.4; g.stroke();
-    g.strokeStyle = '#f0dca0'; g.lineWidth = 1.6; g.stroke();
-    g.fillStyle = '#d6402c'; g.beginPath(); g.arc(x1, y1, 2.4, 0, 6.283); g.fill();
+    g.strokeStyle = 'rgba(255,225,130,0.5)'; g.lineWidth = 13; g.stroke();
+    g.strokeStyle = DV_GOLD; g.lineWidth = 8; g.stroke();
+    g.strokeStyle = DV_WHITE; g.lineWidth = 5; g.stroke();
+    g.strokeStyle = DV_CREAM; g.lineWidth = 1.8; g.stroke();
+    g.fillStyle = DV_WHITE; g.beginPath(); g.arc(x1, y1, 2.8 + pu * 0.8, 0, 6.283); g.fill();
     g.restore();
   }
 
@@ -1581,14 +1631,14 @@
     snap = false;
   }
 
-  // slow gold embers drifting down off the boss and its clone
+  // slow white-gold motes of light rising off the boss and its clone
   function emberStep(dt) {
     if (calm || mode !== 'boss' || !M) return;
     for (var i = 0; i < M.p.length; i++) {
       var q = M.p[i];
       if (!q || q.dead || q.tier !== 'mtboss' || Math.random() > dt * 16) continue;
       var d = disp[i] || q;
-      fx.push({ k: 'p', ember: true, x: d.x + (Math.random() - 0.5) * 18, y: d.y + (Math.random() - 0.5) * 10, vx: (Math.random() - 0.5) * 10, vy: 6 + Math.random() * 8, t: 1.1, T: 1.1, c: q.isClone ? '#8d7a4a' : MT_GOLD_HI });
+      fx.push({ k: 'p', ember: true, x: d.x + (Math.random() - 0.5) * 18, y: d.y + (Math.random() - 0.5) * 10, vx: (Math.random() - 0.5) * 12, vy: -(10 + Math.random() * 14), t: 1.4, T: 1.4, c: q.isClone ? '#c9b27a' : (Math.random() < 0.5 ? DV_WHITE : DV_GOLD) });
     }
   }
   function fxStep(dt) {
@@ -1596,7 +1646,7 @@
       var f = fx[i]; f.t -= dt;
       if (f.k === 'p') {
         f.x += f.vx * dt; f.y += f.vy * dt;
-        if (f.ember) { f.vy += 26 * dt; f.vx *= 0.995; }
+        if (f.ember) { f.vy -= 4 * dt; f.vx *= 0.99; }
         else if (f.leaf) { f.vx *= 0.91; f.vy *= 0.91; }
         else if (f.spark) { f.vx *= 0.88; f.vy *= 0.88; }
         else if (f.roninCut) { f.vx *= 0.85; f.vy *= 0.85; }
@@ -1785,13 +1835,13 @@
 
       if (p.sw >= 0) {
         var act = p.sw >= A0 && p.sw < A1;
-        ctx.globalAlpha = act ? 0.8 : 0.18; ctx.fillStyle = p.tier === 'tetanus' ? '#680c07' : (p.tier === 'mtboss' ? MT_CRIM : c);
+        ctx.globalAlpha = act ? 0.8 : 0.18; ctx.fillStyle = p.tier === 'tetanus' ? '#680c07' : (p.tier === 'mtboss' ? DV_GOLD : c);
         ctx.beginPath(); ctx.moveTo(px, py); ctx.arc(px, py, pReach, p.fa - 1.05, p.fa + 1.05); ctx.closePath(); ctx.fill();
         if (act) {
           if (p.tier === 'mtboss' || look === 'mastertetanus') {
-            ctx.strokeStyle = MT_GOLD_HI; ctx.lineWidth = 4.5; ctx.beginPath();
+            ctx.strokeStyle = DV_WHITE; ctx.lineWidth = 4.5; ctx.beginPath();
             ctx.arc(px, py, pReach, p.fa - 1.0, p.fa + 1.0); ctx.stroke();
-            ctx.strokeStyle = MT_CRIM; ctx.lineWidth = 1.8; ctx.beginPath();
+            ctx.strokeStyle = DV_GOLD; ctx.lineWidth = 2; ctx.beginPath();
             ctx.arc(px, py, pReach - 4, p.fa - 0.75, p.fa + 0.75); ctx.stroke();
           } else if (look === 'silver') {
             ctx.strokeStyle = '#d6d2c8'; ctx.lineWidth = 3.5; ctx.beginPath();
@@ -1901,22 +1951,60 @@
     if (mode === 'boss' && M.boss && M.phase !== 'intro') {
       var bp = M.p[M.bossIdx];
       if (bp) {
-        var bw = 360, bx0 = (W - bw) / 2, by0 = 12, frac = Math.max(0, bp.hearts / bp.maxHearts);
-        ctx.fillStyle = 'rgba(12,8,6,.85)'; ctx.fillRect(bx0 - 4, by0 - 4, bw + 8, 26);
-        ctx.strokeStyle = MT_GOLD; ctx.lineWidth = 2; ctx.strokeRect(bx0 - 3.5, by0 - 3.5, bw + 7, 25);
-        var bg = ctx.createLinearGradient(0, by0, 0, by0 + 18);
-        bg.addColorStop(0, '#c4372a'); bg.addColorStop(1, '#7d150e');
-        ctx.fillStyle = bg; ctx.fillRect(bx0, by0, bw * frac, 18);
-        ctx.fillStyle = 'rgba(224,182,74,.55)'; ctx.fillRect(bx0, by0, bw * frac, 2);
-        ctx.fillStyle = 'rgba(12,8,6,.55)';
-        for (var tk = 1; tk < 10; tk++) ctx.fillRect(bx0 + bw * tk / 10 - 0.5, by0, 1, 18);
-        ctx.textBaseline = 'alphabetic'; ctx.font = '700 13px "Barlow Condensed", sans-serif';
-        ctx.fillStyle = BONE; ctx.textAlign = 'left'; ctx.fillText('MASTERTETANUS', bx0 + 8, by0 + 13);
-        ctx.textAlign = 'right'; ctx.fillText(Math.max(0, bp.hearts) + ' / ' + bp.maxHearts, bx0 + bw - 8, by0 + 13);
+        var bw = 440, bh = 22, bx0 = (W - bw) / 2, by0 = 26, frac = Math.max(0, bp.hearts / bp.maxHearts), bcx = W / 2;
+        if (frac > mtBarLag) mtBarLag = frac; else mtBarLag += (frac - mtBarLag) * 0.05;
+        var low = frac < 0.25, bpu = 0.5 + 0.5 * Math.sin(now / (low ? 160 : 600));
+        // soft divine glow behind the whole bar
+        var gl0 = ctx.createRadialGradient(bcx, by0 + bh / 2, 10, bcx, by0 + bh / 2, bw * 0.62);
+        gl0.addColorStop(0, 'rgba(255,225,130,' + (0.28 + 0.12 * bpu).toFixed(3) + ')'); gl0.addColorStop(1, 'rgba(255,225,130,0)');
+        ctx.fillStyle = gl0; ctx.fillRect(bx0 - 80, by0 - 40, bw + 160, bh + 80);
+        // dark panel and double gold frame
+        ctx.fillStyle = 'rgba(20,14,6,.88)'; ctx.fillRect(bx0 - 6, by0 - 6, bw + 12, bh + 12);
+        ctx.strokeStyle = DV_GOLD; ctx.lineWidth = 2.2; ctx.strokeRect(bx0 - 5.5, by0 - 5.5, bw + 11, bh + 11);
+        ctx.strokeStyle = DV_CREAM; ctx.lineWidth = 0.8; ctx.strokeRect(bx0 - 9.5, by0 - 9.5, bw + 19, bh + 19);
+        // lagging chunk, then the radiant fill
+        if (mtBarLag > frac) { ctx.fillStyle = 'rgba(255,255,255,.55)'; ctx.fillRect(bx0 + bw * frac, by0, bw * (mtBarLag - frac), bh); }
+        var bgd = ctx.createLinearGradient(0, by0, 0, by0 + bh);
+        bgd.addColorStop(0, DV_WHITE); bgd.addColorStop(0.45, DV_GOLD); bgd.addColorStop(1, DV_GOLD_D);
+        ctx.fillStyle = bgd; ctx.fillRect(bx0, by0, bw * frac, bh);
+        // slow shimmer sweeping across the filled part
+        if (frac > 0.02) {
+          ctx.save(); ctx.beginPath(); ctx.rect(bx0, by0, bw * frac, bh); ctx.clip();
+          var sh = ((now / 2600) % 1) * (bw + 120) - 60;
+          var shg = ctx.createLinearGradient(bx0 + sh - 40, 0, bx0 + sh + 40, 0);
+          shg.addColorStop(0, 'rgba(255,255,255,0)'); shg.addColorStop(0.5, 'rgba(255,255,255,.7)'); shg.addColorStop(1, 'rgba(255,255,255,0)');
+          ctx.fillStyle = shg; ctx.fillRect(bx0, by0, bw, bh); ctx.restore();
+        }
+        ctx.fillStyle = 'rgba(255,255,255,.55)'; ctx.fillRect(bx0, by0, bw * frac, 2);
+        ctx.fillStyle = 'rgba(20,14,6,.45)';
+        for (var tk = 1; tk < 10; tk++) ctx.fillRect(bx0 + bw * tk / 10 - 0.5, by0, 1, bh);
+        if (low) { ctx.fillStyle = 'rgba(201,51,31,' + (0.12 + 0.18 * bpu).toFixed(3) + ')'; ctx.fillRect(bx0, by0, bw * frac, bh); }
+        // winged ornaments and diamonds at both ends
+        var sd;
+        for (sd = -1; sd <= 1; sd += 2) {
+          var ox = bcx + sd * (bw / 2 + 14), oy = by0 + bh / 2;
+          ctx.fillStyle = DV_GOLD; ctx.beginPath(); ctx.moveTo(ox, oy - 9); ctx.lineTo(ox + 6, oy); ctx.lineTo(ox, oy + 9); ctx.lineTo(ox - 6, oy); ctx.closePath(); ctx.fill();
+          ctx.fillStyle = DV_WHITE; ctx.beginPath(); ctx.arc(ox, oy, 2.2, 0, 6.283); ctx.fill();
+          ctx.strokeStyle = DV_GOLD; ctx.lineWidth = 1.4; ctx.lineCap = 'round';
+          for (var wf = 0; wf < 3; wf++) {
+            ctx.globalAlpha = 0.85 - wf * 0.2;
+            ctx.beginPath(); ctx.moveTo(ox + sd * 8, oy - wf * 2.5); ctx.lineTo(ox + sd * (24 - wf * 3), oy - 7 - wf * 3.5); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(ox + sd * 8, oy + wf * 2.5); ctx.lineTo(ox + sd * (24 - wf * 3), oy + 7 + wf * 3.5); ctx.stroke();
+          }
+          ctx.globalAlpha = 1;
+        }
+        // name above the bar, hearts inside it
+        ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'center';
+        ctx.font = '700 17px "Barlow Condensed", sans-serif';
+        ctx.fillStyle = DV_GOLD; ctx.fillText('M A S T E R T E T A N U S', bcx, by0 - 14);
+        ctx.fillStyle = 'rgba(255,250,240,.9)'; ctx.fillRect(bcx - 62, by0 - 11, 124, 1);
+        ctx.font = '700 14px "Barlow Condensed", sans-serif';
+        ctx.lineWidth = 3; ctx.lineJoin = 'round'; ctx.strokeStyle = 'rgba(20,14,6,.9)'; ctx.strokeText(Math.max(0, bp.hearts) + ' / ' + bp.maxHearts, bcx, by0 + 16);
+        ctx.fillStyle = DV_WHITE; ctx.fillText(Math.max(0, bp.hearts) + ' / ' + bp.maxHearts, bcx, by0 + 16);
         var cl2 = M.cloneIdx >= 0 ? M.p[M.cloneIdx] : null;
         if (cl2 && !cl2.dead) {
-          ctx.textAlign = 'center'; ctx.fillStyle = MT_GOLD_HI; ctx.font = '700 12px "Barlow Condensed", sans-serif';
-          ctx.fillText('SPLIT  ' + Math.ceil(Math.max(0, cl2.life)) + 's', W / 2, by0 + 38);
+          ctx.textAlign = 'center'; ctx.fillStyle = DV_GOLD; ctx.font = '700 13px "Barlow Condensed", sans-serif';
+          ctx.fillText('SPLIT  ' + Math.ceil(Math.max(0, cl2.life)) + 's', W / 2, by0 + bh + 22);
         }
       }
     }
