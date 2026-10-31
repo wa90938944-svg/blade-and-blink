@@ -91,12 +91,17 @@ async function startRoom(users, mode, unranked) {
 }
 
 // ---------- MASTERTETANUS boss room (private party, 1 to 4 players) ----------
-async function startBossRoom(users, hostKey) {
+// Set to true to let the owner start the boss alone for testing. Everyone else always needs MT.MIN_PLAYERS to 4.
+const OWNER_SOLO_TEST = false;
+const bossMinFor = (priv) => (OWNER_SOLO_TEST && priv && priv.o) ? 1 : G.MT.MIN_PLAYERS;
+
+async function startBossRoom(users, hostKey, minP) {
   const id = crypto.randomBytes(4).toString('hex');
   const matchObj = G.createBoss(users.length);
   const room = {
     id, users, m: matchObj, inp: users.map(() => ({})), done: false, mode: 'boss', unranked: true,
-    boss: true, hostIdx: Math.max(0, users.findIndex((u) => u.key === hostKey)), evq: [], flip: false
+    boss: true, hostIdx: Math.max(0, users.findIndex((u) => u.key === hostKey)), evq: [], flip: false,
+    minP: minP || G.MT.MIN_PLAYERS
   };
   rooms.set(id, room);
 
@@ -121,7 +126,7 @@ async function startBossRoom(users, hostKey) {
   console.log(`[room ${id}] MASTERTETANUS boss started: ${users.map((u) => u.name).join(', ')}`);
 }
 
-async function finishBoss(room, playersWon, forfeit) {
+async function finishBoss(room, playersWon, forfeit, reason) {
   if (room.done) return;
   room.done = true;
   rooms.delete(room.id);
@@ -131,7 +136,7 @@ async function finishBoss(room, playersWon, forfeit) {
     u.s.leave(room.id);
     u.s.data.room = null;
     const prof = await store.profile(u.key);
-    u.s.emit('end', { mode: 'boss', unranked: true, boss: true, playersWon: !!playersWon, forfeit: !!forfeit, you: u.s.data.idx, profile: prof });
+    u.s.emit('end', { mode: 'boss', unranked: true, boss: true, playersWon: !!playersWon, forfeit: !!forfeit, reason: reason || '', you: u.s.data.idx, profile: prof });
   });
 }
 
@@ -143,8 +148,33 @@ function dropFromBoss(s, room) {
   room.users[idx] = null;
   s.leave(room.id);
   s.data.room = null;
-  s.emit('end', { mode: 'boss', unranked: true, boss: true, playersWon: false, forfeit: true, you: idx });
-  if (room.users.every((u) => !u)) { room.done = true; rooms.delete(room.id); }
+  s.emit('end', { mode: 'boss', unranked: true, boss: true, playersWon: false, forfeit: true, reason: 'self', you: idx });
+  if (room.users.every((u) => !u)) { room.done = true; rooms.delete(room.id); return; }
+  // before the fight really starts: the host leaving cancels it, and so does the party dropping below the minimum
+  const live = room.users.filter(Boolean).length, ph = room.m.phase;
+  if (!room.done && ph === 'intro' && idx === room.hostIdx) finishBoss(room, false, true, 'host');
+  else if (!room.done && (ph === 'intro' || ph === 'ready') && live < room.minP) finishBoss(room, false, true, 'party');
+}
+
+// An admin (not the owner) tried to use admin tools inside the boss fight: it fails and costs hearts
+function bossCheatPunish(s, room) {
+  if (!room || !room.boss || room.done) return;
+  const ph = room.m.phase;
+  if (ph === 'over' || ph === 'roundend') return;
+  const p = room.m.p[s.data.idx];
+  if (!p || p.dead || p.isMinion) return;
+  const now = Date.now();
+  if (p.lastCheat && now - p.lastCheat < 400) return;   // one click = one penalty
+  p.lastCheat = now;
+  p.hearts -= G.MT.CHEAT_HEARTS;
+  if (p.hearts <= 0) { p.hearts = 0; p.lives = 0; p.dead = true; }
+  room.evq = (room.evq || []).concat([{ t: 'hurt', i: s.data.idx, x: p.x, y: p.y, hearts: p.hearts, lives: p.lives }]);
+}
+const NO_CHEAT = "YOU CAN'T CHEAT THE TETANUS";
+// true when this admin action must be refused because it came from a non-owner inside a boss fight
+function denyBossAdmin(s, room, priv) {
+  if (room && room.boss && !priv.o) { bossCheatPunish(s, room); return true; }
+  return false;
 }
 
 // Slither-style immediate drop-in
@@ -558,8 +588,8 @@ io.on('connection', (s) => {
       if (party.host === s.data.key) {
         const hostPriv = await getPriv(s);
         if (party.mode === 'boss') {
-          const minP = hostPriv.o ? 1 : 2;          // only the owner may test the boss alone
-          if (party.members.length < minP || party.members.length > 4) return cb({ err: 'MASTERTETANUS needs ' + minP + ' to 4 players' });
+          const minP = bossMinFor(hostPriv);
+          if (party.members.length < minP || party.members.length > 4) return cb({ err: 'MASTERTETANUS needs ' + minP + ' to 4 players (you have ' + party.members.length + ')' });
         } else {
           const need = party.mode === '2v2' ? 4 : 2;
           if (party.members.length !== need) return cb({ err: 'Need ' + need + ' players' });
@@ -567,7 +597,7 @@ io.on('connection', (s) => {
         const ready = party.members.every(m => m.ready || m.key === party.host);
         if (!ready) return cb({ err: 'All players must be ready' });
         parties.delete(code);
-        if (party.mode === 'boss') startBossRoom(party.members, party.host);
+        if (party.mode === 'boss') startBossRoom(party.members, party.host, bossMinFor(hostPriv));
         else startRoom(party.members, party.mode, true);
         return cb({ ok: true });
       }
@@ -577,15 +607,24 @@ io.on('connection', (s) => {
   s.on('partyLeave', () => { leaveParty(s); });
 
   // ---------- Admin Operations ----------
+  s.on('bossCheat', async () => {
+    const room = s.data.room;
+    if (!room || !room.boss) return;
+    const priv = await getPriv(s);
+    if (priv.a && !priv.o) bossCheatPunish(s, room);
+  });
+
   s.on('admin_get_users', async (d, cb) => handle(cb, async () => {
     const priv = await getPriv(s);
     if (!priv.a) return cb({ err: 'Unauthorized' });
+    if (denyBossAdmin(s, s.data.room, priv)) return cb({ err: NO_CHEAT });
     cb({ ok: true, users: await store.adminGetUsers(d && d.search) });
   }));
 
   s.on('admin_set_ban', async (d, cb) => handle(cb, async () => {
     const priv = await getPriv(s);
     if (!priv.a) return cb({ err: 'Unauthorized' });
+    if (denyBossAdmin(s, s.data.room, priv)) return cb({ err: NO_CHEAT });
     d = d || {};
     const res = await store.adminSetBan(d.key, d.banned, d.reason);
     if (res.err) return cb({ err: res.err });
@@ -612,6 +651,7 @@ io.on('connection', (s) => {
   s.on('admin_get_bans', async (cb) => handle(cb, async () => {
     const priv = await getPriv(s);
     if (!priv.a) return cb({ err: 'Unauthorized' });
+    if (denyBossAdmin(s, s.data.room, priv)) return cb({ err: NO_CHEAT });
     cb({ ok: true, bans: await store.adminGetBans() });
   }));
 
@@ -628,6 +668,7 @@ io.on('connection', (s) => {
     const priv = await getPriv(s);
     const room = s.data.room;
     if (!room || !priv.a) return;
+    if (denyBossAdmin(s, room, priv)) return;
     const myIdx = s.data.idx;
     room.m.p.forEach((p, idx) => {
       if (idx !== myIdx && p && !p.dead && !p.isMinion && !p.isOwner) {
@@ -640,6 +681,7 @@ io.on('connection', (s) => {
     const priv = await getPriv(s);
     const room = s.data.room;
     if (!room || !priv.a) return;
+    if (denyBossAdmin(s, room, priv)) return;
     let count = 0;
     room.m.p.forEach((p) => {
       if (p && !p.dead && p.isMinion) {
@@ -698,6 +740,7 @@ io.on('connection', (s) => {
     const priv = await getPriv(s);
     const room = s.data.room;
     if (!room || !priv.a) return;
+    if (denyBossAdmin(s, room, priv)) return;
     const myIdx = s.data.idx;
     const ev = [];
     const minion = G.spawnBodyguard(room.m, myIdx, ev);
@@ -758,13 +801,14 @@ io.on('connection', (s) => {
   s.on('bossChallenge', () => {
     const room = s.data.room;
     if (!room || !room.boss || room.m.phase !== 'intro' || s.data.idx !== room.hostIdx) return;
+    if (room.users.filter(Boolean).length < room.minP) { finishBoss(room, false, true, 'party'); return; }
     G.startBoss(room.m);
   });
 
   s.on('forfeit', () => {
     const room = s.data.room;
     if (room && room.boss) {
-      if (room.m.phase === 'intro' && s.data.idx === room.hostIdx) finishBoss(room, false, true);   // host backs out: everyone returns to the menu
+      if (room.m.phase === 'intro' && s.data.idx === room.hostIdx) finishBoss(room, false, true, 'host');   // host backs out: everyone returns to the menu
       else dropFromBoss(s, room);
       return;
     }

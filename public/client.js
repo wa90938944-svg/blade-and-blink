@@ -842,6 +842,7 @@
         list.appendChild(li);
       });
       $('partystart').hidden = !d.host;
+      $('partystart').textContent = (d.mode === 'boss' && d.members.length < 2) ? 'Start (need 2-4 players)' : 'Start';
       $('partyready').textContent = d.host ? 'Ready (Host)' : 'Toggle Ready';
     });
     
@@ -882,6 +883,7 @@
   // ---------- Admin Panel Interactions ----------
   $('adminbtn').onclick = function () {
     if (!prof || (!prof.isOwner && !prof.isAdmin)) return;
+    if (mode === 'boss' && !prof.isOwner) { mtCheatBlocked(); return; }   // admins cannot cheat the boss
     var inMatch = !!mode;
     $('adminMatchTools').hidden = !inMatch;
     $('adminMenuTools').hidden = inMatch;
@@ -2448,11 +2450,36 @@
       setTimeout(function () { if (jk.parentNode) jk.parentNode.removeChild(jk); }, 3500);
     }, MT_BAN_MS);
   }
+  // an admin (not the owner) pressed the admin panel inside the boss fight
+  var mtCheatEl = null, mtCheatT = 0;
+  function mtCheatBlocked() {
+    if (sock) sock.emit('bossCheat');
+    if (!mtCheatEl) {
+      mtCheatEl = document.createElement('div');
+      mtCheatEl.style.cssText = 'position:fixed;left:0;right:0;top:38%;z-index:97;text-align:center;pointer-events:none;font:900 clamp(22px,6vw,56px) monospace;color:#ff2a2a;text-shadow:0 0 12px #000,3px 0 #0ff,-3px 0 #f0f;letter-spacing:2px';
+      document.body.appendChild(mtCheatEl);
+    }
+    mtCheatEl.textContent = "YOU CAN'T CHEAT THE TETANUS";
+    var sub = document.createElement('div');
+    sub.style.cssText = 'font-size:.4em;color:#fff;margin-top:8px';
+    sub.textContent = '-12 health';
+    mtCheatEl.appendChild(sub);
+    mtCheatEl.style.display = 'block';
+    mtCheatEl.style.animation = 'none';
+    var n = 0; clearInterval(mtCheatT);
+    mtCheatT = setInterval(function () {            // violent shake for about 2 seconds
+      n++;
+      mtCheatEl.style.transform = 'translate(' + ((Math.random() - 0.5) * 22) + 'px,' + ((Math.random() - 0.5) * 14) + 'px)';
+      if (n > 40) { clearInterval(mtCheatT); mtCheatEl.style.display = 'none'; mtCheatEl.style.transform = ''; }
+    }, 50);
+    snd('hurt');
+  }
   function bossEnded(d) {
     mtHideIntro();
     if (d.forfeit) {
       mode = null; M = null; showLobby();
-      toast(mtForfeitSelf ? 'You forfeited the fight.' : 'The host forfeited the fight.');
+      if (d.reason === 'party') toast('Not enough players left. The fight was cancelled.', true);
+      else toast(mtForfeitSelf ? 'You forfeited the fight.' : 'The host left, so the fight was cancelled.');
       mtForfeitSelf = false;
       return;
     }

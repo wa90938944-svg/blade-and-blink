@@ -14,7 +14,9 @@
     REACH: REACH + 10,
     CHARGE_T: 1.2,                 // seconds to regain one blink charge (players: 3.5)
     MAP_SCALE: 1.5,                // arena size compared with the normal 640x400
-    PLAYER_HEARTS: { 1: 25, 2: 15, 3: 8, 4: 5 },   // hearts per player, by party size (1 = solo test only)
+    PLAYER_HEARTS: { 1: 25, 2: 35, 3: 20, 4: 12 }, // hearts per player, by party size (1 = owner solo test only)
+    MIN_PLAYERS: 2,                // a party needs at least this many players to challenge the boss
+    CHEAT_HEARTS: 12,              // hearts an admin (not the owner) loses for opening the admin panel mid-fight
     GUARD_EVERY: 5,                // seconds between bodyguard waves
     GUARD_COUNT: 3,                // veteran bodyguards per wave
     GUARD_MAX: 15,                 // safety valve: most guards alive at once (keeps the server fast)
