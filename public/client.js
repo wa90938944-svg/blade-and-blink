@@ -2074,72 +2074,79 @@
 
   // ---------- MASTERTETANUS: intro dialogue, Challenge / Forfeit, the "banned" prank ----------
   var MT_LINES = [
-    'You have beaten my greatest design.',
-    'Congratulations..',
-    'Why are you playing this game?',
-    'This is such a pointless game.',
-    "You know what? User, I'd love to challenge you."
+    'You killed my favorite creation.',
+    'Congratulations. You wasted your time.',
+    'Why do you even play this trash game?',
+    "It's pointless. You're pointless.",
+    "I'm done being nice. Let's see you try me, user."
   ];
   (function () {
     var st = document.createElement('style');
-    st.textContent = '@keyframes mtfade{from{opacity:0}to{opacity:1}}' +
+    st.textContent = '@keyframes mtfade{from{opacity:0}to{opacity:1}}@keyframes mtblink{0%,49%{opacity:1}50%,100%{opacity:0}}' +
       '@keyframes bshake{0%,100%{transform:translate(0,0) rotate(-1deg)}25%{transform:translate(-6px,4px) rotate(1deg)}50%{transform:translate(5px,-5px) rotate(-2deg)}75%{transform:translate(-4px,-3px) rotate(1deg)}}' +
       '@keyframes bshake2{0%,100%{transform:translate(0,0) rotate(0) scale(1)}10%{transform:translate(-24px,14px) rotate(-4deg) scale(1.04)}20%{transform:translate(20px,-18px) rotate(3deg) scale(.97)}30%{transform:translate(-28px,-10px) rotate(5deg) scale(1.02)}40%{transform:translate(26px,16px) rotate(-3deg) scale(1.05)}50%{transform:translate(-14px,24px) rotate(-5deg) scale(.98)}60%{transform:translate(22px,-22px) rotate(4deg) scale(1.03)}70%{transform:translate(-26px,8px) rotate(-2deg) scale(1.04)}80%{transform:translate(16px,-14px) rotate(5deg) scale(.97)}90%{transform:translate(-20px,18px) rotate(-4deg) scale(1.02)}}' +
       '@keyframes bglitch{0%{text-shadow:6px 0 #ff0000,-6px 0 #00e5ff,0 0 30px rgba(224,48,28,.6)}50%{text-shadow:-8px 3px #ff0000,8px -3px #00e5ff,0 0 40px rgba(224,48,28,.8)}100%{text-shadow:4px -4px #ff0000,-4px 4px #00e5ff,0 0 30px rgba(224,48,28,.6)}}';
     document.head.appendChild(st);
   })();
-  var mtOv = document.createElement('div'), mtLine = document.createElement('div'), mtSub = document.createElement('div'), mtBtns = document.createElement('div');
-  mtOv.style.cssText = 'position:fixed;left:0;top:0;right:0;bottom:0;z-index:90;display:none;flex-direction:column;align-items:center;justify-content:center;gap:28px;padding:24px;text-align:center;background:rgba(6,4,3,.94);color:#efe6d2;font-family:"Barlow Condensed",sans-serif;user-select:none';
-  mtLine.style.cssText = 'font-size:clamp(22px,4.2vw,40px);font-weight:600;letter-spacing:.02em;min-height:1.4em;max-width:900px;line-height:1.25;text-shadow:0 0 18px rgba(181,138,46,.35)';
-  mtSub.style.cssText = 'font-size:14px;letter-spacing:.14em;color:#8b7a52;text-transform:uppercase;min-height:1.2em';
-  mtBtns.style.cssText = 'display:none;gap:16px;flex-wrap:wrap;justify-content:center';
-  function mtBtn(label, bg, fg, bd) {
-    var b = document.createElement('button'); b.textContent = label;
-    b.style.cssText = 'padding:14px 34px;font:700 20px "Barlow Condensed",sans-serif;letter-spacing:.12em;text-transform:uppercase;cursor:pointer;border-radius:2px;background:' + bg + ';color:' + fg + ';border:2px solid ' + bd;
+  // The intro is a bare black terminal: small default monospace text, top left, no glow, typed out after a cmd prompt.
+  var MT_PROMPT = 'C:\\Users\\Administrator\\Downloads\\blade and blink>';
+  var mtOv = document.createElement('div'), mtLog = document.createElement('div'), mtLine = document.createElement('div');
+  var mtPrompt = document.createElement('span'), mtTyped = document.createElement('span'), mtCur = document.createElement('span');
+  var mtSub = document.createElement('div'), mtBtns = document.createElement('div');
+  mtOv.style.cssText = 'position:fixed;left:0;top:0;right:0;bottom:0;z-index:90;display:none;background:#000;color:#c0c0c0;font-family:monospace;font-size:13px;line-height:1.3;padding:8px 10px;text-align:left;white-space:pre-wrap;word-break:break-word;overflow:hidden;user-select:none;cursor:default';
+  mtPrompt.textContent = MT_PROMPT;
+  mtCur.textContent = '_'; mtCur.style.cssText = calm ? '' : 'animation:mtblink 1s steps(1) infinite';
+  mtLine.appendChild(mtPrompt); mtLine.appendChild(mtTyped); mtLine.appendChild(mtCur);
+  mtBtns.style.cssText = 'display:none;gap:22px;margin-top:2px';
+  function mtBtn(label) {
+    var b = document.createElement('button'); b.textContent = '[ ' + label + ' ]';
+    b.style.cssText = 'background:none;border:0;padding:0;margin:0;color:#c0c0c0;font:inherit;cursor:pointer;text-decoration:underline';
+    b.onmouseenter = function () { b.style.color = '#fff'; }; b.onmouseleave = function () { b.style.color = '#c0c0c0'; };
     return b;
   }
-  var mtForfeitBtn = mtBtn('Forfeit', 'transparent', '#9a917f', '#5a5246'), mtChallengeBtn = mtBtn('Challenge', '#7d150e', '#efe6d2', '#b58a2e');
+  var mtForfeitBtn = mtBtn('forfeit'), mtChallengeBtn = mtBtn('challenge');
   mtBtns.appendChild(mtForfeitBtn); mtBtns.appendChild(mtChallengeBtn);
-  mtOv.appendChild(mtLine); mtOv.appendChild(mtBtns); mtOv.appendChild(mtSub);
+  mtOv.appendChild(mtLog); mtOv.appendChild(mtLine); mtOv.appendChild(mtSub); mtOv.appendChild(mtBtns);
   document.body.appendChild(mtOv);
 
   var mtState = null;
   function mtIntroStart(isHost) {
     mtHideIntro();
     mtState = { host: isHost, i: 0, c: 0, timer: 0 };
-    mtOv.style.display = 'flex'; mtBtns.style.display = 'none';
-    mtLine.textContent = ''; mtSub.textContent = 'Click to continue';
-    mtType();
+    mtLog.textContent = ''; mtTyped.textContent = ''; mtSub.textContent = '';
+    mtLine.style.display = ''; mtOv.style.display = 'block'; mtBtns.style.display = 'none';
+    mtState.timer = setTimeout(mtType, 700);
   }
-  function mtType() {                      // typed out slowly, with a long pause on every full stop
+  function mtType() {                      // typed quickly and roughly, a short stop on each full stop
     var st = mtState; if (!st) return;
     var line = MT_LINES[st.i];
     if (st.c < line.length) {
-      var ch = line.charAt(st.c); st.c++; mtLine.textContent = line.slice(0, st.c);
-      st.timer = setTimeout(mtType, ch === '.' ? 340 : (ch === ',' || ch === '?') ? 260 : 62);
+      var ch = line.charAt(st.c); st.c++; mtTyped.textContent = line.slice(0, st.c);
+      st.timer = setTimeout(mtType, ch === '.' || ch === '?' ? 260 : 34 + Math.random() * 30);
     } else {
-      st.timer = setTimeout(mtAdvance, st.i === MT_LINES.length - 1 ? 1200 : 1800);
+      st.timer = setTimeout(mtAdvance, 800);
     }
   }
-  function mtAdvance() {
+  function mtAdvance() {                   // "press enter": the finished line stays, a fresh prompt opens below it
     var st = mtState; if (!st) return;
     clearTimeout(st.timer);
+    var done = document.createElement('div'); done.textContent = MT_PROMPT + MT_LINES[st.i]; mtLog.appendChild(done);
+    mtTyped.textContent = '';
     st.i++;
     if (st.i >= MT_LINES.length) { mtButtons(); return; }
-    st.c = 0; mtLine.textContent = ''; mtType();
+    st.c = 0; st.timer = setTimeout(mtType, 450);
   }
   function mtButtons() {
     var st = mtState; if (!st) return;
     mtSub.textContent = st.host ? '' : 'Waiting for the host to decide...';
     mtChallengeBtn.style.display = st.host ? '' : 'none';
     mtBtns.style.display = 'flex';
-    if (!calm) mtBtns.style.animation = 'mtfade .9s ease both';
   }
   mtOv.addEventListener('click', function (e) {
     var st = mtState; if (!st || (e.target && e.target.tagName === 'BUTTON') || mtBtns.style.display === 'flex') return;
     clearTimeout(st.timer);
     var line = MT_LINES[st.i];
-    if (st.c < line.length) { st.c = line.length; mtLine.textContent = line; st.timer = setTimeout(mtAdvance, 900); }
+    if (st.c < line.length) { st.c = line.length; mtTyped.textContent = line; st.timer = setTimeout(mtAdvance, 500); }
     else mtAdvance();
   });
   mtChallengeBtn.onclick = function () { mtHideIntro(); snd('gong'); if (sock) sock.emit('bossChallenge'); };
