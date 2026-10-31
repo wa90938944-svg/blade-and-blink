@@ -29,7 +29,7 @@
     { id: 'platinum', name: 'Ronin', need: 'Platinum', desc: 'A wide-brimmed ronin hat and a chest plate.' },
     { id: 'diamond', name: 'Champion', need: 'Diamond', desc: 'Crossed scars, a crown and aura, and diamond dash sparks.' }
   ];
-  var TRAIL_TINT = { silver: '#d6d2c8', gold: '#e5b842', platinum: '#c9331f', mastertetanus: '#ffe9a0' };
+  var TRAIL_TINT = { silver: '#d6d2c8', gold: '#e5b842', platinum: '#c9331f', mastertetanus: '#39ff7a' };
   var looks = ['none', 'none'];
   var teams = [0, 1];
   var godActive = false, noCdActive = false, fastActive = false;
@@ -44,9 +44,10 @@
   var MT_GOLD = '#b58a2e', MT_GOLD_HI = '#e0b64a', MT_CRIM = '#8a1a12', MT_BLACK = '#120e0d';
   // divine palette: white-gold light, with a thin crimson edge so he still reads as an anti-hero
   var DV_WHITE = '#fffaf0', DV_CREAM = '#fff1b8', DV_GOLD = '#f2c75c', DV_GOLD_D = '#b8860b', DV_DEEP = '#6b4a08', DV_EYE = '#c9331f';
+  var CODE_GR = '#39ff7a', CODE_CY = '#00e5ff', CODE_MG = '#ff2bd6', CODE_GLYPHS = '01{}<>/;#$=+*|';
   var mtBarLag = 1, MT_BOSS_GLYPH = '#';        // change the character here (any key on the keyboard, like @ $ % &)
   var bossHostIdx = 0, tetToken = '', mtForfeitSelf = false, mtBanOn = false;
-  var OWNER_LOOK = { id: 'mastertetanus', name: 'MASTERTETANUS', need: 'Owner', desc: 'Divine: a blazing white-gold body, wings of light, a double halo and rising gold motes. Owner only.' };
+  var OWNER_LOOK = { id: 'mastertetanus', name: 'MASTERTETANUS', need: 'Owner', desc: 'Glitch code: a flickering green-cyan-magenta body, orbiting characters, a flat-cut blade, and a code-slash swing and dash. Owner only.' };
   function isNet() { return mode === 'online' || mode === 'ffa' || mode === '2v2' || mode === 'boss'; }
   function allLooks() { return LOOKS.concat(prof && prof.isOwner ? [OWNER_LOOK] : []); }
 
@@ -125,9 +126,117 @@
     }
     g.globalAlpha = 1;
   }
+  // ---------- MASTERTETANUS owner skin: glitchy code look ----------
+  // cgGate gives a steady pseudo-random 0..1 that changes every 80 ms, so glitches come in short bursts
+  function cgGate(now, seed) { var k = Math.floor(now / 80) + (seed | 0) * 17, x = Math.sin(k * 12.9898) * 43758.5453; return x - Math.floor(x); }
+  function codeAura(g, px, py, now) {
+    var k, n = 8, rot = now / 1400, off = cgGate(now, 3) < 0.1;
+    g.save(); g.font = 'bold 9px monospace'; g.textAlign = 'center'; g.textBaseline = 'middle';
+    for (k = 0; k < n; k++) {
+      var a = rot + k * 6.283 / n, r = R + 10 + Math.sin(now / 300 + k) * 2;
+      var ch = CODE_GLYPHS.charAt((Math.floor(now / 260) + k * 5) % CODE_GLYPHS.length);
+      g.globalAlpha = (off ? 0.2 : 0.65) * (0.6 + 0.4 * Math.sin(now / 200 + k * 2));
+      g.fillStyle = k % 3 === 0 ? CODE_CY : CODE_GR;
+      g.fillText(ch, px + Math.cos(a) * r, py + Math.sin(a) * r);
+    }
+    g.globalAlpha = 0.35; g.strokeStyle = CODE_GR; g.lineWidth = 1; g.setLineDash([3, 5]); g.lineDashOffset = -now / 60;
+    g.beginPath(); g.arc(px, py, R + 6, 0, 6.283); g.stroke(); g.setLineDash([]); g.lineDashOffset = 0;
+    g.restore();
+  }
+  // The body. wind is 0..1 while charging a dash (glitches get heavier), negative or missing otherwise.
+  function codeBody(g, px, py, c, now, wind) {
+    var gl = cgGate(now, 0) < 0.16, w = (typeof wind === 'number' && wind >= 0) ? wind : 0, i, split = (gl ? 3 : 0) + w * 8;
+    g.save();
+    if (split > 0.5) {                               // RGB split: cyan and magenta copies knocked sideways
+      g.lineWidth = 2; g.globalAlpha = 0.6;
+      g.strokeStyle = CODE_CY; g.beginPath(); g.arc(px + split * (0.5 + Math.random() * 0.6), py + (Math.random() - 0.5) * w * 4, R, 0, 6.283); g.stroke();
+      g.strokeStyle = CODE_MG; g.beginPath(); g.arc(px - split * (0.5 + Math.random() * 0.6), py + (Math.random() - 0.5) * w * 4, R, 0, 6.283); g.stroke();
+    }
+    g.globalAlpha = 1;
+    g.fillStyle = '#07100b'; g.beginPath(); g.arc(px, py, R, 0, 6.283); g.fill();
+    g.strokeStyle = c; g.lineWidth = 2.2; g.beginPath(); g.arc(px, py, R - 1.2, 0, 6.283); g.stroke();
+    g.strokeStyle = CODE_GR; g.lineWidth = 1.2; g.beginPath(); g.arc(px, py, R * 0.66, 0, 6.283); g.stroke();
+    g.fillStyle = CODE_GR; g.font = 'bold 10px monospace'; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillText(gl || w > 0.4 ? (Math.random() < 0.5 ? '01' : '#!') : '{}', px, py + 0.5);
+    if (gl || w > 0) {                               // horizontal slices of the body, shoved sideways
+      var n = 1 + Math.floor(w * 3) + (gl ? 1 : 0);
+      g.beginPath(); g.arc(px, py, R, 0, 6.283); g.clip();
+      for (i = 0; i < n; i++) {
+        var sy = py - R + Math.random() * 2 * R, h = 1.5 + Math.random() * 3, dx = (Math.random() - 0.5) * (8 + w * 12);
+        g.globalAlpha = 0.55; g.fillStyle = i % 2 ? CODE_CY : CODE_GR; g.fillRect(px - R + dx, sy, 2 * R, h);
+      }
+    }
+    g.restore();
+    if (w > 0) {                                     // characters spitting off the body while the dash charges
+      g.save(); g.font = 'bold 9px monospace'; g.textAlign = 'center'; g.textBaseline = 'middle';
+      var cnt = 3 + Math.floor(w * 7);
+      for (i = 0; i < cnt; i++) {
+        var a = Math.random() * 6.283, r = R + 2 + Math.random() * 14;
+        g.globalAlpha = 0.4 + 0.5 * w; g.fillStyle = i % 3 === 0 ? CODE_MG : (i % 2 ? CODE_CY : CODE_GR);
+        g.fillText(CODE_GLYPHS.charAt((Math.random() * CODE_GLYPHS.length) | 0), px + Math.cos(a) * r, py + Math.sin(a) * r);
+      }
+      g.restore();
+    }
+  }
+  // Sharp, flat-cut blade: straight edges and a slanted chisel end instead of a needle point
+  function codeBlade(g, px, py, fa, c, now, dim) {
+    var ca = Math.cos(fa), sa = Math.sin(fa), nx = -sa, ny = ca, u0 = R * 0.45, u1 = R + 14, u2 = R + 18, hw = 3.4, gl = cgGate(now, 7) < 0.14, i;
+    function P(u, v, ox) { return [px + ca * u + nx * v + (ox || 0), py + sa * u + ny * v]; }
+    function poly(ox) {
+      var pts = [P(u0, -hw, ox), P(u1, -hw, ox), P(u2, hw, ox), P(u0, hw, ox)];
+      g.beginPath(); g.moveTo(pts[0][0], pts[0][1]);
+      for (i = 1; i < pts.length; i++) g.lineTo(pts[i][0], pts[i][1]);
+      g.closePath();
+    }
+    var base = dim ? 0.45 : 1;
+    g.save(); g.lineJoin = 'miter'; g.lineCap = 'butt';
+    if (gl) {
+      g.globalAlpha = 0.7 * base; g.lineWidth = 1.4;
+      g.strokeStyle = CODE_CY; poly(2.6); g.stroke();
+      g.strokeStyle = CODE_MG; poly(-2.6); g.stroke();
+    }
+    g.globalAlpha = base;
+    g.fillStyle = '#06140c'; poly(0); g.fill();
+    g.strokeStyle = CODE_GR; g.lineWidth = 1.8; g.stroke();
+    var e0 = P(u0, -hw), e1 = P(u1, -hw), e2 = P(u2, hw);           // the cutting edge and the slanted end shine white
+    g.strokeStyle = '#eafff1'; g.lineWidth = 1.3;
+    g.beginPath(); g.moveTo(e0[0], e0[1]); g.lineTo(e1[0], e1[1]); g.lineTo(e2[0], e2[1]); g.stroke();
+    g.strokeStyle = CODE_GR; g.lineWidth = 0.9; g.globalAlpha = 0.7 * base;     // small tick marks, like a ruler or a line of code
+    for (i = 1; i < 4; i++) { var tk = P(u0 + (u1 - u0) * i / 4, 0), tk2 = P(u0 + (u1 - u0) * i / 4, hw - 1); g.beginPath(); g.moveTo(tk[0], tk[1]); g.lineTo(tk2[0], tk2[1]); g.stroke(); }
+    g.globalAlpha = base; g.strokeStyle = c; g.lineWidth = 2.6;      // crossguard keeps your team colour
+    var g0 = P(u0 + 1, -hw - 2.4), g1 = P(u0 + 1, hw + 2.4);
+    g.beginPath(); g.moveTo(g0[0], g0[1]); g.lineTo(g1[0], g1[1]); g.stroke();
+    g.restore();
+  }
+  function dashCode(x1, y1, x2, y2) {
+    var dx = x2 - x1, dy = y2 - y1, len = Math.hypot(dx, dy) || 1, nx = -dy / len, ny = dx / len, i;
+    for (i = 0; i < 28; i++) {
+      var t = Math.random(), off = (Math.random() - 0.5) * 28;
+      fx.push({ k: 'p', glyph: CODE_GLYPHS.charAt((Math.random() * CODE_GLYPHS.length) | 0), x: x1 + dx * t + nx * off, y: y1 + dy * t + ny * off,
+        vx: nx * off * 2 + (Math.random() - 0.5) * 36, vy: ny * off * 2 + (Math.random() - 0.5) * 36, t: 0.45 + Math.random() * 0.45,
+        c: i % 3 === 0 ? CODE_MG : (i % 3 === 1 ? CODE_GR : CODE_CY) });
+    }
+    for (i = 0; i <= 6; i++) { var tt = i / 6, life = 0.3 + 0.05 * i; fx.push({ k: 'cg', x: x1 + dx * tt, y: y1 + dy * tt, t: life, T: life }); }
+    fx.push({ k: 'cl', x1: x1, y1: y1, x2: x2, y2: y2, t: 0.42, T: 0.42, seed: Math.random() * 1000 });
+  }
+  // matrix-rain characters shedding off the owner skin all the time, many more while a dash is charging
+  function codeStep(dt) {
+    if (calm || !M || mode === 'boss') return;
+    for (var i = 0; i < M.p.length; i++) {
+      var q = M.p[i];
+      if (!q || q.dead || q.isMinion || (looks[i] || '') !== 'mastertetanus') continue;
+      var d = disp[i] || q, wind = q.bw > 0;
+      if (Math.random() > dt * (wind ? 40 : 12)) continue;
+      var a = Math.random() * 6.283, r = R + 4 + Math.random() * 10;
+      fx.push({ k: 'p', glyph: CODE_GLYPHS.charAt((Math.random() * CODE_GLYPHS.length) | 0), x: d.x + Math.cos(a) * r, y: d.y + Math.sin(a) * r,
+        vx: (Math.random() - 0.5) * 14 + (wind ? Math.cos(a) * 40 : 0), vy: wind ? Math.sin(a) * 40 : 10 + Math.random() * 16,
+        t: 0.8 + Math.random() * 0.5, c: Math.random() < 0.6 ? CODE_GR : (Math.random() < 0.5 ? CODE_CY : CODE_MG) });
+    }
+  }
+
   function lookBelow(g, look, px, py, c, now) {
     if (look === 'mastertetanus') {
-      divineAura(g, px, py, now, 0.95, true, false);
+      codeAura(g, px, py, now);
       return;
     }
     if (look !== 'diamond') return;
@@ -137,7 +246,7 @@
     g.globalAlpha = 0.1 + 0.1 * pu; g.beginPath(); g.arc(px, py, R + 15 + pu * 4, 0, 7); g.stroke();
     g.globalAlpha = 1;
   }
-  function lookAbove(g, look, px, py, c) {
+  function lookAbove(g, look, px, py, c, wind) {
     var i, a;
     var isRed = (c === COL[1]);
     var rimColor = isRed ? '#191514' : INK;
@@ -145,13 +254,7 @@
     var secondary = isRed ? '#ffe8d6' : '#9e9788';
 
     if (look === 'mastertetanus') {
-      var bg0 = g.createRadialGradient(px - R * 0.25, py - R * 0.3, 1, px, py, R);
-      bg0.addColorStop(0, DV_WHITE); bg0.addColorStop(0.6, DV_CREAM); bg0.addColorStop(1, DV_GOLD);
-      g.fillStyle = bg0; g.beginPath(); g.arc(px, py, R, 0, 6.283); g.fill();
-      g.strokeStyle = c; g.lineWidth = 2.4; g.beginPath(); g.arc(px, py, R - 1.2, 0, 6.283); g.stroke();
-      g.strokeStyle = DV_GOLD_D; g.lineWidth = 1.2; g.beginPath(); g.arc(px, py, R * 0.6, 0, 6.283); g.stroke();
-      g.fillStyle = DV_GOLD_D; g.beginPath(); g.moveTo(px, py - 4); g.lineTo(px + 2.8, py); g.lineTo(px, py + 4); g.lineTo(px - 2.8, py); g.closePath(); g.fill();
-      g.fillStyle = DV_WHITE; g.beginPath(); g.arc(px, py, 1.3, 0, 6.283); g.fill();
+      codeBody(g, px, py, c, Date.now(), wind);
     } else if (look === 'bronze') {
       strokePath(g, [[-0.8, -0.6], [-0.2, -0.12], [0.08, 0.1], [0.78, 0.62]], px, py, accentBone, 2.0);
     } else if (look === 'silver') {
@@ -198,6 +301,7 @@
     var x0 = px + ca * R * 0.4, y0 = py + sa * R * 0.4, x1 = px + ca * (R + 14), y1 = py + sa * (R + 14);
     var isRed = (c === COL[1]);
     g.globalAlpha = dim ? 0.45 : 1; g.lineCap = 'round';
+    if (look === 'mastertetanus') { codeBlade(g, px, py, fa, c, Date.now(), dim); g.globalAlpha = 1; return; }
     g.beginPath(); g.moveTo(x0, y0); g.lineTo(x1, y1);
     if (look === 'mastertetanus') { g.strokeStyle = 'rgba(255,225,130,0.45)'; g.lineWidth = 14; g.stroke(); g.strokeStyle = DV_GOLD; g.lineWidth = 10; g.stroke(); }
     else if (look === 'gold') { g.strokeStyle = GOLD; g.lineWidth = 9.5; g.stroke(); }
@@ -1331,6 +1435,10 @@
   // Crescent sweep that follows the sword swing
   function slashArc(e) {
     var p = M && M.p && M.p[e.i]; if (!p) return;
+    if ((looks[e.i] || '') === 'mastertetanus' && mode !== 'boss') {      // the owner skin swings with a code slash instead
+      fx.push({ k: 'cs', x: e.x, y: e.y, a: p.fa || 0, r: (p.reach || S.REACH) * (e.scale || 1), t: 0.26, T: 0.26 });
+      return;
+    }
     fx.push({ k: 'a', x: e.x, y: e.y, a: p.fa || 0, r: (p.reach || S.REACH) * (e.scale || 1), t: 0.2, T: 0.2, c: COL[teams[e.i] || 0] });
   }
   // Radial impact lines on hits and parries
@@ -1413,8 +1521,10 @@
       else if (e.t === 'blink') {
         c = e.unparryable ? '#680c07' : COL[teams[e.i] || 0];
         var lk = looks[e.i] || 'none';
-        fx.push({ k: 'l', x1: e.x1, y1: e.y1, x2: e.x2, y2: e.y2, t: 0.4, c: c, tint: TRAIL_TINT[lk] });
-        if (lk === 'diamond') sparks(e.x1, e.y1, e.x2, e.y2, c);
+        var codeDash = lk === 'mastertetanus' && mode !== 'boss';
+        if (!codeDash) fx.push({ k: 'l', x1: e.x1, y1: e.y1, x2: e.x2, y2: e.y2, t: 0.4, c: c, tint: TRAIL_TINT[lk] });
+        if (codeDash) dashCode(e.x1, e.y1, e.x2, e.y2);
+        else if (lk === 'diamond') sparks(e.x1, e.y1, e.x2, e.y2, c);
         else if (lk === 'silver') dashWanderer(e.x1, e.y1, e.x2, e.y2, c);
         else if (lk === 'gold') dashVeteran(e.x1, e.y1, e.x2, e.y2, c);
         else if (lk === 'platinum') dashRonin(e.x1, e.y1, e.x2, e.y2, c);
@@ -1706,6 +1816,7 @@
         else if (f.leaf) { f.vx *= 0.91; f.vy *= 0.91; }
         else if (f.spark) { f.vx *= 0.88; f.vy *= 0.88; }
         else if (f.roninCut) { f.vx *= 0.85; f.vy *= 0.85; }
+        else if (f.glyph) { f.vx *= 0.97; f.vy *= 0.97; }
         else { f.vx *= 0.94; f.vy *= 0.94; }
       }
       else if (f.k === 'd') {
@@ -1807,6 +1918,42 @@
         ctx.globalAlpha = a; ctx.strokeStyle = PAPER; ctx.lineWidth = 2;
         ctx.beginPath(); ctx.arc(f.x, f.y, f.r * 0.92, f.a - 1.0 + 0.9 * sw, f.a - 1.0 + 2.0 * sw); ctx.stroke();
         ctx.restore();
+      } else if (f.k === 'cs') {              // code slash: a stepped arc of characters and blocks that sweeps with the swing
+        var sw2 = Math.min(1, (1 - a) * 2.2), n2 = 16, cnt2 = Math.max(1, Math.round(n2 * sw2)), j;
+        ctx.save(); ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.font = 'bold 12px monospace';
+        for (j = 0; j < cnt2; j++) {
+          var ang2 = f.a - 1.0 + 2.0 * j / (n2 - 1), rr2 = f.r * 0.92 + Math.sin(j * 91.7 + f.t * 40) * 5;
+          var cx2 = f.x + Math.cos(ang2) * rr2, cy2 = f.y + Math.sin(ang2) * rr2;
+          ctx.globalAlpha = a * 0.9; ctx.fillStyle = j % 3 === 0 ? CODE_CY : CODE_GR;
+          ctx.fillText(CODE_GLYPHS.charAt((j * 5 + Math.floor(f.t * 30)) % CODE_GLYPHS.length), cx2, cy2);
+          ctx.globalAlpha = a * 0.55; ctx.fillStyle = CODE_MG;
+          ctx.fillRect(cx2 + Math.cos(ang2 + 1.57) * 5 - 4, cy2 + Math.sin(ang2 + 1.57) * 5 - 1.2, 8, 2.4);
+        }
+        ctx.globalAlpha = a * 0.8; ctx.strokeStyle = CODE_GR; ctx.lineWidth = 2; ctx.setLineDash([9, 6]);
+        ctx.beginPath(); ctx.arc(f.x, f.y, f.r * 0.92, f.a - 1.0, f.a - 1.0 + 2.0 * sw2); ctx.stroke();
+        ctx.strokeStyle = CODE_CY; ctx.lineWidth = 1; ctx.lineDashOffset = 5;
+        ctx.beginPath(); ctx.arc(f.x, f.y, f.r * 0.92 + 5, f.a - 1.0, f.a - 1.0 + 2.0 * sw2); ctx.stroke();
+        ctx.restore();
+      } else if (f.k === 'cl') {              // code dash line: jittering blocks and a dashed core along the dash path
+        var ddx = f.x2 - f.x1, ddy = f.y2 - f.y1, ln2 = Math.hypot(ddx, ddy) || 1, nn2 = -ddy / ln2, mm2 = ddx / ln2, st2 = Math.max(2, Math.ceil(ln2 / 9)), q2;
+        ctx.save();
+        for (q2 = 0; q2 <= st2; q2++) {
+          var u2 = q2 / st2, off2 = Math.sin(q2 * 53.1 + f.seed) * 7;
+          ctx.globalAlpha = a * 0.85; ctx.fillStyle = q2 % 3 === 0 ? CODE_MG : (q2 % 2 ? CODE_GR : CODE_CY);
+          ctx.fillRect(f.x1 + ddx * u2 + nn2 * off2 - 4, f.y1 + ddy * u2 + mm2 * off2 - 1.5, 8, 3);
+        }
+        ctx.globalAlpha = a; ctx.strokeStyle = CODE_GR; ctx.lineWidth = 2; ctx.setLineDash([7, 5]);
+        ctx.beginPath(); ctx.moveTo(f.x1, f.y1); ctx.lineTo(f.x2, f.y2); ctx.stroke();
+        ctx.strokeStyle = CODE_CY; ctx.lineWidth = 1; ctx.lineDashOffset = 6;
+        ctx.beginPath(); ctx.moveTo(f.x1 + nn2 * 4, f.y1 + mm2 * 4); ctx.lineTo(f.x2 + nn2 * 4, f.y2 + mm2 * 4); ctx.stroke();
+        ctx.restore();
+      } else if (f.k === 'cg') {              // glitch afterimage: RGB-split rings and a sliced bar
+        ctx.save(); ctx.lineWidth = 1.6;
+        ctx.globalAlpha = a * 0.7; ctx.strokeStyle = CODE_CY; ctx.beginPath(); ctx.arc(f.x + 2 + 3 * (1 - a), f.y, R, 0, 6.283); ctx.stroke();
+        ctx.strokeStyle = CODE_MG; ctx.beginPath(); ctx.arc(f.x - 2 - 3 * (1 - a), f.y, R, 0, 6.283); ctx.stroke();
+        ctx.globalAlpha = a * 0.9; ctx.strokeStyle = CODE_GR; ctx.beginPath(); ctx.arc(f.x, f.y, R, 0, 6.283); ctx.stroke();
+        ctx.globalAlpha = a * 0.5; ctx.fillStyle = CODE_GR; ctx.fillRect(f.x - R + (Math.random() - 0.5) * 10, f.y - R + Math.random() * 2 * R, 2 * R, 2);
+        ctx.restore();
       } else if (f.k === 's') {
         var sr = 8 + (1 - a) * 22;
         ctx.save(); ctx.globalAlpha = a; ctx.strokeStyle = f.c; ctx.lineCap = 'round'; ctx.lineWidth = 3 * a + 0.5;
@@ -1820,6 +1967,9 @@
         ctx.globalAlpha = Math.min(1, f.t * 2); ctx.fillStyle = f.c;
         if (f.ember) {
           ctx.globalAlpha = a; ctx.beginPath(); ctx.arc(f.x, f.y, 1.7, 0, 6.283); ctx.fill();
+        } else if (f.glyph) {
+          ctx.font = 'bold 10px monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.globalAlpha = Math.min(1, f.t * 2);
+          ctx.fillText(f.glyph, f.x, f.y);
         } else if (f.dust) {
           ctx.globalAlpha = 0.3 * a; ctx.beginPath(); ctx.arc(f.x, f.y, 3 + (1 - a) * 7, 0, 6.283); ctx.fill();
         } else if (f.dm) {
@@ -1892,10 +2042,17 @@
 
       if (p.sw >= 0) {
         var act = p.sw >= A0 && p.sw < A1;
-        ctx.globalAlpha = act ? 0.8 : 0.18; ctx.fillStyle = p.tier === 'tetanus' ? '#680c07' : (p.tier === 'mtboss' ? DV_GOLD : c);
+        ctx.globalAlpha = act ? 0.8 : 0.18; ctx.fillStyle = p.tier === 'tetanus' ? '#680c07' : (p.tier === 'mtboss' ? DV_GOLD : (look === 'mastertetanus' ? '#1fbf5a' : c));
         ctx.beginPath(); ctx.moveTo(px, py); ctx.arc(px, py, pReach, p.fa - 1.05, p.fa + 1.05); ctx.closePath(); ctx.fill();
         if (act) {
-          if (p.tier === 'mtboss' || look === 'mastertetanus') {
+          if (look === 'mastertetanus' && p.tier !== 'mtboss') {
+            ctx.setLineDash([8, 5]); ctx.lineDashOffset = -now / 25;
+            ctx.strokeStyle = CODE_GR; ctx.lineWidth = 3.5; ctx.beginPath();
+            ctx.arc(px, py, pReach, p.fa - 1.0, p.fa + 1.0); ctx.stroke();
+            ctx.strokeStyle = CODE_CY; ctx.lineWidth = 1.6; ctx.lineDashOffset = now / 30; ctx.beginPath();
+            ctx.arc(px, py, pReach - 5, p.fa - 0.9 + 0.05, p.fa + 0.9 + 0.05); ctx.stroke();
+            ctx.setLineDash([]); ctx.lineDashOffset = 0;
+          } else if (p.tier === 'mtboss' || look === 'mastertetanus') {
             ctx.strokeStyle = DV_WHITE; ctx.lineWidth = 4.5; ctx.beginPath();
             ctx.arc(px, py, pReach, p.fa - 1.0, p.fa + 1.0); ctx.stroke();
             ctx.strokeStyle = DV_GOLD; ctx.lineWidth = 2; ctx.beginPath();
@@ -1970,7 +2127,7 @@
           ctx.fillStyle = 'rgba(255,255,255,' + (0.2 + 0.65 * shine).toFixed(2) + ')';
           ctx.beginPath(); ctx.arc(px - pR * 0.32, py - pR * 0.36, pR * 0.2, 0, 7); ctx.fill();
         }
-        lookAbove(ctx, look, px, py, c);
+        lookAbove(ctx, look, px, py, c, shine);
         drawBlade(ctx, look, px, py, p.fa, c, p.sc > 0);
       }
 
@@ -2392,7 +2549,7 @@
     if (M && (mode === 'endless' || mode === 'ffa' || mode === 'bot' || mode === 'boss')) hud();
     if (touch) padState();
     fxStep(M && M.phase === 'roundend' ? dt * 0.4 : dt);
-    emberStep(dt);
+    emberStep(dt); codeStep(dt);
     draw(now);
   }
   if (touch) {
