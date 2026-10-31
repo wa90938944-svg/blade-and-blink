@@ -1145,7 +1145,7 @@
       disp = [];
       beginView();
       $('rnd').textContent = d.mode === '2v2' ? '2v2 Duel' : d.mode === 'boss' ? 'MASTERTETANUS' : 'Ranked';
-      if (d.mode === 'boss') { bossHostIdx = d.hostIdx; mtForfeitSelf = false; mtIntroStart(d.you === d.hostIdx); }
+      if (d.mode === 'boss') { bossHostIdx = d.hostIdx; mtForfeitSelf = false; mtBanSeen = false; mtIntroStart(d.you === d.hostIdx); }
     });
     sock.on('ffa_meta', function (d) {
       if (mode !== 'ffa') return;
@@ -1158,6 +1158,8 @@
       M = d.m; onEv(d.ev);
       // the host pressed Challenge: release everyone else from the intro screen too
       if (mode === 'boss' && M && M.phase !== 'intro' && mtState) mtHideIntro();
+      // MASTERTETANUS just died: cut to black right now, don't wait for the server's end message
+      if (mode === 'boss' && M && M.boss && M.phase === 'roundend' && M.score && M.score[0]) showBanned();
     });
     sock.on('end', function (d) {
       if (d.mode === 'boss') { if (d.profile) setProfile(d.profile); bossEnded(d); return; }
@@ -2081,7 +2083,9 @@
   (function () {
     var st = document.createElement('style');
     st.textContent = '@keyframes mtfade{from{opacity:0}to{opacity:1}}' +
-      '@keyframes bshake{0%,100%{transform:translate(0,0) rotate(-1deg)}25%{transform:translate(-6px,4px) rotate(1deg)}50%{transform:translate(5px,-5px) rotate(-2deg)}75%{transform:translate(-4px,-3px) rotate(1deg)}}';
+      '@keyframes bshake{0%,100%{transform:translate(0,0) rotate(-1deg)}25%{transform:translate(-6px,4px) rotate(1deg)}50%{transform:translate(5px,-5px) rotate(-2deg)}75%{transform:translate(-4px,-3px) rotate(1deg)}}' +
+      '@keyframes bshake2{0%,100%{transform:translate(0,0) rotate(0) scale(1)}10%{transform:translate(-24px,14px) rotate(-4deg) scale(1.04)}20%{transform:translate(20px,-18px) rotate(3deg) scale(.97)}30%{transform:translate(-28px,-10px) rotate(5deg) scale(1.02)}40%{transform:translate(26px,16px) rotate(-3deg) scale(1.05)}50%{transform:translate(-14px,24px) rotate(-5deg) scale(.98)}60%{transform:translate(22px,-22px) rotate(4deg) scale(1.03)}70%{transform:translate(-26px,8px) rotate(-2deg) scale(1.04)}80%{transform:translate(16px,-14px) rotate(5deg) scale(.97)}90%{transform:translate(-20px,18px) rotate(-4deg) scale(1.02)}}' +
+      '@keyframes bglitch{0%{text-shadow:6px 0 #ff0000,-6px 0 #00e5ff,0 0 30px rgba(224,48,28,.6)}50%{text-shadow:-8px 3px #ff0000,8px -3px #00e5ff,0 0 40px rgba(224,48,28,.8)}100%{text-shadow:4px -4px #ff0000,-4px 4px #00e5ff,0 0 30px rgba(224,48,28,.6)}}';
     document.head.appendChild(st);
   })();
   var mtOv = document.createElement('div'), mtLine = document.createElement('div'), mtSub = document.createElement('div'), mtBtns = document.createElement('div');
@@ -2142,18 +2146,53 @@
   mtForfeitBtn.onclick = function () { mtForfeitSelf = true; mtHideIntro(); if (sock) sock.emit('forfeit'); };
   function mtHideIntro() { if (mtState) clearTimeout(mtState.timer); mtState = null; mtOv.style.display = 'none'; }
 
-  // Beating MASTERTETANUS shows a fake ban screen. Nothing is banned, it just sends you to the menu.
-  var mtBan = document.createElement('div'), mtBanText = document.createElement('div');
-  mtBan.style.cssText = 'position:fixed;left:0;top:0;right:0;bottom:0;z-index:95;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.9);padding:20px';
+  // Beating MASTERTETANUS cuts straight to black with a fake ban screen and a fake Windows-style crash box.
+  // Nothing is banned and nothing crashes. After 8 seconds you land back in the menu and it just says "jk".
+  var MT_BAN_MS = 8000, MT_CRASH_DELAY = 1100, mtBanSeen = false;
+  var mtBan = document.createElement('div'), mtBanText = document.createElement('div'), mtCrash = document.createElement('div');
+  mtBan.style.cssText = 'position:fixed;left:0;top:0;right:0;bottom:0;z-index:95;display:none;align-items:center;justify-content:center;background:#000;padding:20px;overflow:hidden;cursor:none';
   mtBanText.textContent = "YOU'RE BANNED!!!";
   mtBanText.style.cssText = 'font-family:"Dela Gothic One",Impact,sans-serif;font-size:clamp(40px,10vw,128px);color:#e0301c;text-align:center;letter-spacing:.02em;text-shadow:0 0 30px rgba(224,48,28,.55);line-height:1.05';
-  mtBan.appendChild(mtBanText); document.body.appendChild(mtBan);
+  mtCrash.style.cssText = 'position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);width:min(440px,92vw);background:#f0f0f0;border:1px solid #707070;box-shadow:0 10px 36px rgba(0,0,0,.7);font:12px "Segoe UI",Tahoma,Arial,sans-serif;color:#000;z-index:96;display:none;user-select:none;cursor:default';
+  mtCrash.innerHTML =
+    '<div style="height:31px;background:#fff;display:flex;align-items:center;justify-content:space-between;padding-left:10px">' +
+      '<span style="font-size:12px">Blade &amp; Blink</span>' +
+      '<span data-x="1" style="width:46px;height:31px;line-height:31px;text-align:center;font-size:15px;cursor:default">&#10005;</span>' +
+    '</div>' +
+    '<div style="background:#fff;padding:22px 22px 26px;display:flex;gap:16px;align-items:flex-start">' +
+      '<div style="flex:none;width:32px;height:32px;border-radius:50%;background:#d6202b;color:#fff;font:700 20px/32px Arial,sans-serif;text-align:center">&#10005;</div>' +
+      '<div style="line-height:1.5"><div style="font-size:14px;margin-bottom:6px">Game crashed</div>' +
+      '<div style="color:#444">Blade &amp; Blink has stopped working. The program will now close.</div>' +
+      '<div style="color:#888;margin-top:8px;font-size:11px">Exception code: 0xC0000005 (ACCESS_VIOLATION)</div></div>' +
+    '</div>' +
+    '<div style="background:#f0f0f0;padding:12px 14px;text-align:right;border-top:1px solid #dfdfdf">' +
+      '<span data-ok="1" style="display:inline-block;min-width:73px;height:21px;line-height:21px;text-align:center;background:#e1e1e1;border:1px solid #adadad;cursor:default">OK</span>' +
+    '</div>';
+  mtBan.appendChild(mtBanText); mtBan.appendChild(mtCrash); document.body.appendChild(mtBan);
+  (function () {
+    var x = mtCrash.querySelector('[data-x]'), ok = mtCrash.querySelector('[data-ok]');
+    x.onmouseenter = function () { x.style.background = '#e81123'; x.style.color = '#fff'; };
+    x.onmouseleave = function () { x.style.background = ''; x.style.color = ''; };
+    ok.onmouseenter = function () { ok.style.background = '#e5f1fb'; ok.style.borderColor = '#0078d7'; };
+    ok.onmouseleave = function () { ok.style.background = '#e1e1e1'; ok.style.borderColor = '#adadad'; };
+    x.onclick = ok.onclick = function () { mtCrash.style.display = 'none'; };
+  })();
   function showBanned() {
-    if (mtBanOn) return;
-    mtBanOn = true;
-    mtBan.style.display = 'flex'; mtBanText.style.animation = calm ? 'none' : 'bshake .35s linear infinite';
-    snd('lifeloss'); snd('gong');
-    setTimeout(function () { mtBan.style.display = 'none'; mtBanOn = false; mode = null; mtHideIntro(); showLobby(); }, 4200);
+    if (mtBanOn || mtBanSeen) return;
+    mtBanOn = true; mtBanSeen = true;
+    mode = null;                                   // the fight stops dead, like a real crash
+    mtHideIntro();
+    mtBan.style.display = 'flex'; mtCrash.style.display = 'none';
+    mtBanText.style.animation = calm ? 'none' : 'bshake2 .22s linear infinite, bglitch .12s steps(2) infinite';
+    setTimeout(function () { if (mtBanOn) mtCrash.style.display = 'block'; }, MT_CRASH_DELAY);
+    setTimeout(function () {
+      mtBan.style.display = 'none'; mtCrash.style.display = 'none'; mtBanOn = false; mode = null; mtHideIntro(); showLobby();
+      var jk = document.createElement('div');       // plain unstyled text: browser default font, no box
+      jk.textContent = 'jk';
+      jk.style.cssText = 'all:initial;position:fixed;left:50%;top:45%;transform:translate(-50%,-50%);z-index:96;font-size:20px;color:#000';
+      document.body.appendChild(jk);
+      setTimeout(function () { if (jk.parentNode) jk.parentNode.removeChild(jk); }, 3500);
+    }, MT_BAN_MS);
   }
   function bossEnded(d) {
     mtHideIntro();
