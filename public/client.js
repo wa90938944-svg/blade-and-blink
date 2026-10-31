@@ -1156,6 +1156,8 @@
     sock.on('s', function (d) {
       if (!isNet()) return;
       M = d.m; onEv(d.ev);
+      // the host pressed Challenge: release everyone else from the intro screen too
+      if (mode === 'boss' && M && M.phase !== 'intro' && mtState) mtHideIntro();
     });
     sock.on('end', function (d) {
       if (d.mode === 'boss') { if (d.profile) setProfile(d.profile); bossEnded(d); return; }
