@@ -347,6 +347,19 @@
     g.restore();
   }
 
+  // Retro pong look for the boss fight: a plain white circle with one sharp blade. The boss gets a thin red edge so it still reads as the enemy.
+  function drawPong(g, px, py, fa, boss, p) {
+    var clone = !!p.isClone, st = p.st > 0, ca = Math.cos(fa), sa = Math.sin(fa), nx = -sa, ny = ca;
+    var edge = boss ? '#c9331f' : '#191514';
+    var bx = px + ca * (R - 1), by = py + sa * (R - 1), tx = px + ca * (R + 20), ty = py + sa * (R + 20);
+    g.save(); g.globalAlpha = clone ? 0.55 : 1; g.lineJoin = 'miter';
+    g.beginPath(); g.moveTo(bx + nx * 3.4, by + ny * 3.4); g.lineTo(tx, ty); g.lineTo(bx - nx * 3.4, by - ny * 3.4); g.closePath();
+    g.fillStyle = '#ffffff'; g.fill(); g.strokeStyle = edge; g.lineWidth = 1.6; g.stroke();
+    g.fillStyle = st ? '#bdbdbd' : '#ffffff'; g.beginPath(); g.arc(px, py, R, 0, 6.283); g.fill();
+    g.lineWidth = 2; g.stroke();
+    g.restore();
+  }
+
   function drawFighter(g, look, px, py, c, fa, now) {
     lookBelow(g, look, px, py, c, now);
     g.fillStyle = c; g.beginPath(); g.arc(px, py, R, 0, 7); g.fill();
@@ -1049,7 +1062,7 @@
   }
 
   function beginView() {
-    fx = []; snap = true; lastPhase = ''; lastScore = [0, 0]; msgT = 0;
+    fx = []; snap = true; lastPhase = ''; lastScore = [0, 0]; msgT = 0; mtTermReset();
     shake = punch = flash = freeze = vig = 0;
     cam.x = W / 2; cam.y = H / 2;
     inkX.clearRect(0, 0, W, H);
@@ -1333,6 +1346,7 @@
   function hitStop(t) { if (!isNet()) freeze = t; }
 
   function onEv(ev) {
+    if (mode === 'boss') mtTermEvents(ev);
     (ev || []).forEach(function (e) {
       var c, small;
       if (e.t === 'swing') { snd('swing', e.x); slashArc(e); }
@@ -1424,6 +1438,7 @@
   function watch() {
     if (!M || M.phase === lastPhase) return;
     lastPhase = M.phase;
+    if (mode === 'boss') { if (M.phase === 'ready') mtSay('challenge accepted'); else if (M.phase === 'fight') mtSay('fight started'); }
     if (M.phase === 'ready') {
       say(M.boss ? 'MASTERTETANUS' : isBossEncounter ? 'SURVIVE TETANUS' : M.endless ? 'Survive!' : mode === 'bot' ? names[1] : 'Round ' + M.round, 1.3);
       snap = true;
@@ -1901,7 +1916,9 @@
       if (p.tier === 'tetanus') {
         drawTetanus(ctx, px, py, p.fa, now, p);
       } else if (p.tier === 'mtboss') {
-        drawMasterBoss(ctx, px, py, p.fa, now, p);
+        drawPong(ctx, px, py, p.fa, true, p);
+      } else if (mode === 'boss' && !p.isMinion) {
+        drawPong(ctx, px, py, p.fa, false, p);
       } else {
         lookBelow(ctx, look, px, py, c, now);
         var shine = p.bw > 0 ? 1 - p.bw / S.BLINK_WIND : -1;
@@ -1955,60 +1972,13 @@
     if (mode === 'boss' && M.boss && M.phase !== 'intro') {
       var bp = M.p[M.bossIdx];
       if (bp) {
-        var bw = 440, bh = 22, bx0 = (W - bw) / 2, by0 = 26, frac = Math.max(0, bp.hearts / bp.maxHearts), bcx = W / 2;
-        if (frac > mtBarLag) mtBarLag = frac; else mtBarLag += (frac - mtBarLag) * 0.05;
-        var low = frac < 0.25, bpu = 0.5 + 0.5 * Math.sin(now / (low ? 160 : 600));
-        // soft divine glow behind the whole bar
-        var gl0 = ctx.createRadialGradient(bcx, by0 + bh / 2, 10, bcx, by0 + bh / 2, bw * 0.62);
-        gl0.addColorStop(0, 'rgba(255,225,130,' + (0.28 + 0.12 * bpu).toFixed(3) + ')'); gl0.addColorStop(1, 'rgba(255,225,130,0)');
-        ctx.fillStyle = gl0; ctx.fillRect(bx0 - 80, by0 - 40, bw + 160, bh + 80);
-        // dark panel and double gold frame
-        ctx.fillStyle = 'rgba(20,14,6,.88)'; ctx.fillRect(bx0 - 6, by0 - 6, bw + 12, bh + 12);
-        ctx.strokeStyle = DV_GOLD; ctx.lineWidth = 2.2; ctx.strokeRect(bx0 - 5.5, by0 - 5.5, bw + 11, bh + 11);
-        ctx.strokeStyle = DV_CREAM; ctx.lineWidth = 0.8; ctx.strokeRect(bx0 - 9.5, by0 - 9.5, bw + 19, bh + 19);
-        // lagging chunk, then the radiant fill
-        if (mtBarLag > frac) { ctx.fillStyle = 'rgba(255,255,255,.55)'; ctx.fillRect(bx0 + bw * frac, by0, bw * (mtBarLag - frac), bh); }
-        var bgd = ctx.createLinearGradient(0, by0, 0, by0 + bh);
-        bgd.addColorStop(0, DV_WHITE); bgd.addColorStop(0.45, DV_GOLD); bgd.addColorStop(1, DV_GOLD_D);
-        ctx.fillStyle = bgd; ctx.fillRect(bx0, by0, bw * frac, bh);
-        // slow shimmer sweeping across the filled part
-        if (frac > 0.02) {
-          ctx.save(); ctx.beginPath(); ctx.rect(bx0, by0, bw * frac, bh); ctx.clip();
-          var sh = ((now / 2600) % 1) * (bw + 120) - 60;
-          var shg = ctx.createLinearGradient(bx0 + sh - 40, 0, bx0 + sh + 40, 0);
-          shg.addColorStop(0, 'rgba(255,255,255,0)'); shg.addColorStop(0.5, 'rgba(255,255,255,.7)'); shg.addColorStop(1, 'rgba(255,255,255,0)');
-          ctx.fillStyle = shg; ctx.fillRect(bx0, by0, bw, bh); ctx.restore();
-        }
-        ctx.fillStyle = 'rgba(255,255,255,.55)'; ctx.fillRect(bx0, by0, bw * frac, 2);
-        ctx.fillStyle = 'rgba(20,14,6,.45)';
-        for (var tk = 1; tk < 10; tk++) ctx.fillRect(bx0 + bw * tk / 10 - 0.5, by0, 1, bh);
-        if (low) { ctx.fillStyle = 'rgba(201,51,31,' + (0.12 + 0.18 * bpu).toFixed(3) + ')'; ctx.fillRect(bx0, by0, bw * frac, bh); }
-        // winged ornaments and diamonds at both ends
-        var sd;
-        for (sd = -1; sd <= 1; sd += 2) {
-          var ox = bcx + sd * (bw / 2 + 14), oy = by0 + bh / 2;
-          ctx.fillStyle = DV_GOLD; ctx.beginPath(); ctx.moveTo(ox, oy - 9); ctx.lineTo(ox + 6, oy); ctx.lineTo(ox, oy + 9); ctx.lineTo(ox - 6, oy); ctx.closePath(); ctx.fill();
-          ctx.fillStyle = DV_WHITE; ctx.beginPath(); ctx.arc(ox, oy, 2.2, 0, 6.283); ctx.fill();
-          ctx.strokeStyle = DV_GOLD; ctx.lineWidth = 1.4; ctx.lineCap = 'round';
-          for (var wf = 0; wf < 3; wf++) {
-            ctx.globalAlpha = 0.85 - wf * 0.2;
-            ctx.beginPath(); ctx.moveTo(ox + sd * 8, oy - wf * 2.5); ctx.lineTo(ox + sd * (24 - wf * 3), oy - 7 - wf * 3.5); ctx.stroke();
-            ctx.beginPath(); ctx.moveTo(ox + sd * 8, oy + wf * 2.5); ctx.lineTo(ox + sd * (24 - wf * 3), oy + 7 + wf * 3.5); ctx.stroke();
-          }
-          ctx.globalAlpha = 1;
-        }
-        // name above the bar, hearts inside it
-        ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'center';
-        ctx.font = '700 17px "Barlow Condensed", sans-serif';
-        ctx.fillStyle = DV_GOLD; ctx.fillText('M A S T E R T E T A N U S', bcx, by0 - 14);
-        ctx.fillStyle = 'rgba(255,250,240,.9)'; ctx.fillRect(bcx - 62, by0 - 11, 124, 1);
-        ctx.font = '700 14px "Barlow Condensed", sans-serif';
-        ctx.lineWidth = 3; ctx.lineJoin = 'round'; ctx.strokeStyle = 'rgba(20,14,6,.9)'; ctx.strokeText(Math.max(0, bp.hearts) + ' / ' + bp.maxHearts, bcx, by0 + 16);
-        ctx.fillStyle = DV_WHITE; ctx.fillText(Math.max(0, bp.hearts) + ' / ' + bp.maxHearts, bcx, by0 + 16);
+        var by0 = 20, bh = 0, bn = Math.max(0, Math.ceil(bp.hearts)), bmax = bp.maxHearts;
+        ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'center'; ctx.font = 'bold 13px monospace'; ctx.fillStyle = INK;
+        ctx.fillText('[' + new Array(bn + 1).join('|') + new Array(Math.max(0, bmax - bn) + 1).join(' ') + ']', W / 2, by0);
         var cl2 = M.cloneIdx >= 0 ? M.p[M.cloneIdx] : null;
         if (cl2 && !cl2.dead) {
-          ctx.textAlign = 'center'; ctx.fillStyle = DV_GOLD; ctx.font = '700 13px "Barlow Condensed", sans-serif';
-          ctx.fillText('SPLIT  ' + Math.ceil(Math.max(0, cl2.life)) + 's', W / 2, by0 + bh + 22);
+          ctx.textAlign = 'center'; ctx.fillStyle = INK; ctx.font = '12px monospace';
+          ctx.fillText('split ' + Math.ceil(Math.max(0, cl2.life)) + 's', W / 2, by0 + 16);
         }
       }
     }
@@ -2093,7 +2063,7 @@
   var mtOv = document.createElement('div'), mtLog = document.createElement('div'), mtLine = document.createElement('div');
   var mtPrompt = document.createElement('span'), mtTyped = document.createElement('span'), mtCur = document.createElement('span');
   var mtSub = document.createElement('div'), mtBtns = document.createElement('div');
-  mtOv.style.cssText = 'position:fixed;left:0;top:0;right:0;bottom:0;z-index:90;display:none;background:#000;color:#c0c0c0;font-family:monospace;font-size:13px;line-height:1.3;padding:8px 10px;text-align:left;white-space:pre-wrap;word-break:break-word;overflow:hidden;user-select:none;cursor:default';
+  mtOv.style.cssText = 'position:fixed;left:0;top:0;right:0;bottom:0;z-index:90;display:none;background:rgba(0,0,0,.74);color:#c0c0c0;font-family:monospace;font-size:13px;line-height:1.3;padding:8px 10px;text-align:left;white-space:pre-wrap;word-break:break-word;overflow:hidden;user-select:none;cursor:default';
   mtPrompt.textContent = MT_PROMPT;
   mtCur.textContent = '_'; mtCur.style.cssText = calm ? '' : 'animation:mtblink 1s steps(1) infinite';
   mtLine.appendChild(mtPrompt); mtLine.appendChild(mtTyped); mtLine.appendChild(mtCur);
@@ -2153,6 +2123,53 @@
   mtForfeitBtn.onclick = function () { mtForfeitSelf = true; mtHideIntro(); if (sock) sock.emit('forfeit'); };
   function mtHideIntro() { if (mtState) clearTimeout(mtState.timer); mtState = null; mtOv.style.display = 'none'; }
 
+  // ---------- In-fight terminal: every boss event gets typed out in the top left corner ----------
+  var MT_MAP_NAME = 'MASTERTETANUS ARENA', MT_TERM_MAX = 14, MT_TERM_LINE_PX = 15;
+  var mtTerm = document.createElement('div'), mtTermQ = [], mtTermBusy = false, mtTermGen = 0, mtTermN = 0, mtTermMile = 0;
+  mtTerm.style.cssText = 'position:fixed;left:6px;top:6px;z-index:40;display:none;pointer-events:none;font-family:monospace;font-size:12px;line-height:' + MT_TERM_LINE_PX + 'px;color:#e6e6e6;text-align:left;white-space:pre';
+  document.body.appendChild(mtTerm);
+  function mtTermRow(text) {
+    var d = document.createElement('div'); d.style.cssText = 'display:table;background:rgba(0,0,0,.68);padding:0 4px';
+    d.textContent = text; mtTerm.appendChild(d); return d;
+  }
+  function mtTermHeader() { mtTerm.textContent = ''; mtTermRow('blade and blink - ' + MT_MAP_NAME); mtTermN = 1; }
+  function mtTermReset() { mtTermGen++; mtTermQ = []; mtTermBusy = false; mtTermMile = 0; mtTermHeader(); }
+  function mtTermMax() { return Math.max(5, Math.min(MT_TERM_MAX, Math.floor((window.innerHeight * 0.5) / MT_TERM_LINE_PX))); }
+  function mtSay(text) {
+    if (mtTermQ.length >= 10) mtTermQ.shift();
+    mtTermQ.push(text);
+    if (!mtTermBusy) mtTermPump();
+  }
+  function mtTermPump() {
+    var gen = mtTermGen, text = mtTermQ.shift();
+    if (text === undefined) { mtTermBusy = false; return; }
+    mtTermBusy = true;
+    if (mtTermN >= mtTermMax()) mtTermHeader();      // the window is full: wipe it and start again under the map name
+    var row = mtTermRow(''), i = 0, full = '> ' + text;
+    (function step() {
+      if (gen !== mtTermGen) return;
+      i++; row.textContent = full.slice(0, i);
+      if (i < full.length) setTimeout(step, 14);
+      else { mtTermN++; setTimeout(function () { if (gen === mtTermGen) mtTermPump(); }, 120); }
+    })();
+  }
+  function mtTermEvents(ev) {
+    if (!M || !ev) return;
+    var guards = 0;
+    ev.forEach(function (e) { if (e.t === 'spawn_minion' && e.owner === M.bossIdx) guards++; });
+    if (guards) mtSay('MASTERTETANUS summoned ' + guards + ' bodyguard' + (guards > 1 ? 's' : ''));
+    ev.forEach(function (e) {
+      if (e.t === 'clone_spawn') { var cp = M.p[e.i]; mtSay('MASTERTETANUS split in two' + (cp && cp.life ? ' (' + Math.round(cp.life) + 's)' : '')); }
+      else if (e.t === 'clone_end') mtSay('the clone faded');
+      else if (e.t === 'kill' && e.i < (M.nPlayers || 0)) mtSay((names[e.i] || 'player') + ' was eliminated');
+      else if (e.t === 'hurt' && e.i === M.bossIdx || e.t === 'hurt' && M.p[e.i] && M.p[e.i].isClone) {
+        var bp0 = M.p[M.bossIdx], pct = bp0 && bp0.maxHearts ? e.hearts / bp0.maxHearts * 100 : 100, marks = [75, 50, 25, 10];
+        while (mtTermMile < marks.length && pct <= marks[mtTermMile]) { mtSay('MASTERTETANUS is at ' + marks[mtTermMile] + '% health'); mtTermMile++; }
+      }
+    });
+  }
+  function mtTermSync() { mtTerm.style.display = (mode === 'boss' && M && M.phase !== 'intro') ? 'block' : 'none'; }
+
   // Beating MASTERTETANUS cuts straight to black with a fake ban screen and a fake Windows-style crash box.
   // Nothing is banned and nothing crashes. After 8 seconds you land back in the menu and it just says "jk".
   var MT_BAN_MS = 8000, MT_CRASH_DELAY = 1100, mtBanSeen = false;
@@ -2182,7 +2199,15 @@
     x.onmouseleave = function () { x.style.background = ''; x.style.color = ''; };
     ok.onmouseenter = function () { ok.style.background = '#e5f1fb'; ok.style.borderColor = '#0078d7'; };
     ok.onmouseleave = function () { ok.style.background = '#e1e1e1'; ok.style.borderColor = '#adadad'; };
-    x.onclick = ok.onclick = function () { mtCrash.style.display = 'none'; };
+    x.onclick = ok.onclick = function () {         // closing it does nothing: it pops back up a moment later, slightly off
+      mtCrash.style.display = 'none';
+      setTimeout(function () {
+        if (!mtBanOn) return;
+        var dx = Math.round((Math.random() - 0.5) * 90), dy = Math.round((Math.random() - 0.5) * 70);
+        mtCrash.style.transform = 'translate(calc(-50% + ' + dx + 'px), calc(-50% + ' + dy + 'px))';
+        mtCrash.style.display = 'block';
+      }, 650);
+    };
   })();
   function showBanned() {
     if (mtBanOn || mtBanSeen) return;
@@ -2298,7 +2323,7 @@
         if (M.phase === 'over') finishLocal();
       }
     }
-    watch(); smooth();
+    watch(); smooth(); mtTermSync();
     if (M && (mode === 'endless' || mode === 'ffa' || mode === 'bot' || mode === 'boss')) hud();
     if (touch) padState();
     fxStep(M && M.phase === 'roundend' ? dt * 0.4 : dt);
